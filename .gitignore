@@ -1,0 +1,33 @@
+# 密钥与凭证 —— 永远不要提交
+.env
+config/cookies/
+config/user_config.yaml*
+
+# 用户个人资产（声音样本 / 形象照片，default 占位除外）
+config/voices/
+config/avatars/*
+!config/avatars/default/
+
+# 运行时产物
+workspace_data/
+output/
+logs/
+*.db
+
+# 大素材
+config/broll_assets/
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+
+# 系统与编辑器
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

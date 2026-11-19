@@ -1,0 +1,633 @@
+# FreeVideoAI 默认配置
+# 所有配置项均可通过环境变量覆盖，环境变量格式：KRVOICEAI_<大写路径>
+# 例如：KRVOICEAI_LLM_API_KEY 覆盖 llm.api_key
+
+project:
+  name: FreeVideoAI
+  version: 0.1.0
+  # 工作根目录，所有任务产物存放于此
+  work_root: ./workspace_data
+  # 临时目录
+  temp_root: ./workspace_data/tmp
+
+# 日志配置
+logging:
+  level: INFO  # DEBUG / INFO / WARNING / ERROR
+  file: ./workspace_data/logs/krvoiceai.log
+  rotation: "10 MB"
+  retention: "30 days"
+  console: true
+
+# 硬件分档（GPU Profile）
+# 启动时自动检测显卡定档，重模型引擎按档做护栏（不够档直接拒跑，不会 OOM 半路崩）
+# cloud: 无独显（只云端 API + CPU 兜底） / lite: 4-16GB（VoxCPM+MuseTalk）/ pro: ≥16GB（+LatentSync/EchoMimic）
+hardware:
+  tier: auto  # auto / cloud / lite / pro（手动覆盖检测结果）
+
+# LLM 配置（文案/标题生成）
+llm:
+  provider: deepseek  # deepseek / qwen / openai / mock
+  api_key: ""         # 从环境变量 KRVOICEAI_LLM_API_KEY 读取
+  base_url: https://api.deepseek.com/v1
+  model: deepseek-chat
+  temperature: 0.7
+  max_tokens: 2000
+  timeout: 60
+
+# TTS 配置（声音克隆）
+tts:
+  provider: voxcpm  # voxcpm / moss_nano / mimo / gpt_sovits / edge_tts / mock
+  # 合成失败降级链（逐级尝试，日志记录降级原因）
+  fallback_chain: [voxcpm, moss_nano, edge_tts]
+  # TTS 结果缓存：hash(文本+音色+关键参数) -> <dir>/<hash>.wav，命中直接复用
+  cache:
+    enabled: true
+    dir: ./workspace_data/cache/tts
+  # GPT-SoVITS 云端服务地址
+  api_base: http://localhost:9880
+  api_key: ""
+  timeout: 120
+  # VoxCPM-0.5B 配置（provider=voxcpm 时使用，本机 GPU 声音克隆，默认档）
+  # 通过独立 venv 子进程运行 scripts/voxcpm_worker.py，进程退出自动释放显存
+  voxcpm:
+    # VoxCPM 专属 venv 的 python（torch-CUDA + voxcpm 包）
+    venv_python: ../VoxCPM/.venv/Scripts/python.exe
+    # VoxCPM-0.5B 模型目录
+    model_dir: ../VoxCPM/pretrained_models/VoxCPM-0.5B
+    # worker 脚本（相对项目根目录）
+    worker_script: ./scripts/voxcpm_worker.py
+    # CFG 引导强度（2.0 平衡音质与相似度）
+    cfg_value: 2.0
+    # 扩散推理步数（10 为速度档，越大越慢音质越好）
+    inference_timesteps: 10
+    # 随机种子（固定保证可复现）
+    seed: 42
+    # 长文本分段字数上限（段间拼 0.25s 静音）
+    max_seg_chars: 120
+    # 子进程超时（秒）
+    timeout: 600
+    # 合成前 GPU 空闲显存下限（MB），不足直接走降级链；0=跳过检查
+    min_free_vram_mb: 2500
+  # MiMo TTS 配置（provider=mimo 时使用）
+  mimo_model: mimo-v2.5-tts
+  # edge-tts 降级配置
+  edge_voice: zh-CN-XiaoxiaoNeural
+  # 音色库目录
+  voices_dir: ./config/voices
+  default_voice: default
+  # MOSS-TTS-Nano 配置（provider=moss_nano 时使用，本地 CPU 声音克隆）
+  moss_nano:
+    # MOSS-TTS-Nano 仓库根目录（含 onnx_tts_runtime.py）
+    repo_dir: ../MOSS-TTS-Nano
+    # ONNX 模型目录（含 MOSS-TTS-Nano-100M-ONNX 和 MOSS-Audio-Tokenizer-Nano-ONNX）
+    model_dir: ../MOSS-TTS-Nano/models
+    # CPU 线程数
+    cpu_threads: 4
+    # 执行后端：cpu / cuda
+    execution_provider: cpu
+    # 内置音色（无参考音频时使用）：Junhao / Trump / Ava / Bella / Adam / Nathan
+    builtin_voice: Junhao
+    # 文本归一化是否启用 WeTextProcessing（需 pynini，Windows 难装建议关）
+    enable_wetext: false
+    # 是否启用 robust normalizer
+    enable_normalize_tts_text: true
+    # 长文本分块 token 预算
+    voice_clone_max_text_tokens: 75
+    # 最大生成音频帧数
+    max_new_frames: 375
+    # 实时流式解码（更快）
+    realtime_streaming: true
+
+# 数字人配置（口播生成）
+avatar:
+  # musetalk_local: 本地 MuseTalk 1.5（GPU 近实时，默认，失败自动降级 wav2lip）
+  # omnihuman_api: 经 CV 兼容中转站生成 OmniHuman 数字人
+  # latentsync_local / echomimic_local: 4090 级本地档（≥16GB 显存护栏拦截，小卡拒跑）
+  provider: musetalk_local  # musetalk_local / omnihuman_api / latentsync_local / echomimic_local / wav2lip / musetalk / latentsync / echomimic / mock
+  # 云端服务地址（musetalk/latentsync 用）
+  api_base: http://localhost:8010
+  api_key: ""
+  timeout: 300
+  # 形象库目录
+  avatars_dir: ./config/avatars
+  default_avatar: default
+  # 输出视频参数
+  output_fps: 25
+  output_resolution: [1080, 1920]  # 竖版
+  # MuseTalk 本地配置（GPU 唇形同步，近实时；provider=musetalk_local 时使用）
+  # 独立环境 musetalk_env（Python 3.10 + torch 2.0.1+cu118），与主 venv 隔离
+  # fallback 链：musetalk_local 失败自动降级 wav2lip（日志写明原因）
+  musetalk_local:
+    # 独立 Python 环境
+    env_python: ../musetalk_env/Scripts/python.exe
+    # MuseTalk 仓库根目录（模型在 <repo>/models/ 官方目录结构）
+    repo_dir: ../MuseTalk
+    # Worker 脚本（FreeVideoAI 侧，包装官方 scripts.inference）
+    worker_script: ./scripts/musetalk_worker.py
+    # 模型版本：v15（推荐）/ v1
+    version: v15
+    # 推理 batch（RTX 2060 6GB 保守用 4；OOM 时 worker 自动减半重试）
+    batch_size: 4
+    # fp16 推理（省一半显存，6GB 卡建议开）
+    use_float16: true
+    # 输出帧率
+    fps: 25
+    # 人脸裁剪下边距（官方默认 10）
+    extra_margin: 10
+    # 融合模式：jaw（下颌，官方 v1.5 默认）/ raw
+    parsing_mode: jaw
+    # 显存闸门：空闲显存不足时等待（其它进程可能短暂占卡）
+    min_free_vram_mb: 4096
+    vram_wait_retries: 10
+    vram_wait_seconds: 60
+    # 推理超时（秒）
+    timeout: 1800
+  # Wav2Lip 配置（本地 CPU 唇形同步，嘴会动；musetalk_local 的 fallback）
+  wav2lip:
+    # 模型权重（wav2lip_gan.pth 比 wav2lip.pth 画质略好）
+    checkpoint_path: ../Wav2Lip/checkpoints/wav2lip_gan.pth
+    # 独立 Python 环境路径（Wav2Lip 需要 Python 3.8 + torch 1.13）
+    # 由 scripts/setup_wav2lip_env.bat 创建
+    env_python: ../wav2lip_env/Scripts/python.exe
+    # 推理脚本路径（Wav2Lip 仓库的 inference.py）
+    inference_script: ../Wav2Lip/inference.py
+    face_det_batch_size: 2
+    wav2lip_batch_size: 2
+    # 扩大 padding：上10/下40/左10/右10，确保头部移动时人脸框不切到嘴部
+    pads: [10, 40, 10, 10]
+    # resize_factor=1 用原分辨率推理（人脸检测精度最高，头部移动时嘴部对齐准确）
+    # CPU 模式较慢（1分钟视频约30-60分钟），但嘴唇替换效果最佳
+    resize_factor: 1
+    # 启用平滑（T=5 居中窗口）：以当前帧为中心取前后帧均值，减少头部移动时人脸框滞后/漂移
+    # 配合 resize_factor=1 高精度检测 + 扩大 pads，既保证精度又避免崩溃
+    nosmooth: false
+    # inference.py 已内置羽化嘴部聚焦融合：
+    #   - 下 65% 区域（嘴部）完全用 Wav2Lip 生成结果
+    #   - 上 35% 区域（眼睛/额头）保留原始帧，边缘羽化过渡
+    #   - 消除"整张脸块状替换"伪影，头部移动时错位不可见
+  # 微动作层（FFmpeg 后处理，缓解"只有嘴动"的恐怖谷）
+  # 给静态照片/Wav2Lip 输出加：呼吸缩放 + 微抖动 + 眨眼亮度节奏
+  micro_motion:
+    enabled: false        # 默认关，避免对高质量云端输出过度处理；本地 wav2lip 建议开
+    breathing_scale: 0.02 # 呼吸缩放幅度（1.0 ± 此值，0.02 = 2% 缩放）
+    breathing_period: 4.0 # 呼吸周期（秒）
+    shake_amplitude: 0.3  # 微抖动幅度（度，±0.3° 摆动）
+    shake_period: 2.0     # 抖动周期（秒）
+    blink_enabled: true   # 眨眼（用周期性亮度脉冲近似闭眼节奏）
+    blink_interval: 4.0   # 眨眼间隔（秒）
+  # LatentSync 1.5 配置（云端 GPU，provider=latentsync 时使用）
+  # 字节跳动开源，潜在扩散模型，口型质量超过 MuseTalk，适合高质量口播/无人直播
+  latentsync:
+    config: high_quality  # high_quality / fast（质量/速度权衡）
+    inference_steps: 25   # 扩散步数（25 平衡，50 最高质量，10 最快）
+    resolution: 512       # 处理分辨率（512 推荐，256 更快）
+    seed: -1              # 随机种子（-1 随机）
+  # 即梦数字人云端配置（provider=omnihuman_api 时使用）
+  # 字节 OmniHuman：一张照片+音频 → 全身驱动数字人视频（头/手势/身体全动）
+  # 中转站地址与密钥在数字人模型页配置；版本也在该页切换
+  omnihuman:
+    # 模型版本：v15（OmniHuman1.5，720P/1080P，默认）/ v1（快速模式1.0，480P）。均 1 元/秒
+    version: v15
+    # 输出分辨率（v15）：720 或 1080
+    output_resolution: 1080
+    # 可选表演提示词（≤300字符，如"自然表情，口型清晰"）
+    prompt: ""
+    # 任务提交后的轮询间隔与总超时（秒）。
+    # 实测：48秒音频@1080p 生成 10-20 分钟属正常，900s 会误杀长音频任务（云端仍在做、额度照扣），故设 30 分钟
+    poll_interval: 10
+    poll_timeout: 1800
+    # 生成视频最长时长（秒）。API 硬上限 60s；官方建议单段 ≤15s 效果最佳，
+    # 长口播建议开 B-roll/多景别拆分节奏而不是拉长单段
+    max_duration: 60
+  # LatentSync 1.6 本地档（provider=latentsync_local，≥18GB 显存，4090 级机器）
+  # 显存护栏：不够档直接拒跑并降级 musetalk_local，绝不在小卡上尝试
+  latentsync_local:
+    repo_dir: ../LatentSync
+    env_python: ../LatentSync/.venv/Scripts/python.exe
+    worker_script: ./scripts/latentsync_worker.py
+    min_vram_gb: 18
+    inference_steps: 25
+    timeout: 3600
+  # EchoMimic V3 本地档（provider=echomimic_local，≥12GB 显存）
+  # 半身+手势驱动，最接近"全身流畅"的本地方案
+  echomimic_local:
+    repo_dir: ../echomimic_v3
+    env_python: ../echomimic_v3/.venv/Scripts/python.exe
+    worker_script: ./scripts/echomimic_worker.py
+    min_vram_gb: 12
+    sample_steps: 5
+    timeout: 3600
+
+# ASR 配置（字幕/文案提取）
+asr:
+  # provider 优先级（本地优先）：
+  #   whisper_local: faster-whisper CPU int8，词级时间戳，本地推荐（需 pip install -e ".[local]"）
+  #   funasr:        FunASR 服务（本地或云端，需 GPU）
+  #   mimo:          小米 MiMo ASR API（云端）
+  #   mock:          降级（复用 TTS 时间戳或按字数估算）
+  provider: whisper_local
+  model: paraformer-zh
+  # 本地运行时模型缓存目录
+  model_cache: ./workspace_data/models/asr
+  language: zh
+  # 文案提取：yt-dlp 自动从本机浏览器读取 cookies（用户无感知，无需手动上传）
+  # 抖音/快手强力反爬，yt-dlp 需 cookies 才能下载。设置后自动从已登录浏览器读取。
+  # 支持值：chrome / edge / firefox / brave / opera / safari / chromium / "" (禁用)
+  # 前提：用户在本机浏览器登录过 douyin.com 即可，yt-dlp 自动提取 cookies
+  cookies_from_browser: "chrome"
+  # cookies 文件路径（Netscape 格式 .txt，手动指定，优先级低于 cookies_from_browser）
+  cookies_file: ""
+  # MiMo ASR 配置（provider=mimo 时使用）
+  api_base: https://token-plan-cn.xiaomimimo.com/v1
+  api_key: ""
+  mimo_model: mimo-v2.5-asr
+  timeout: 120
+  # faster-whisper 本地配置（provider=whisper_local 时使用）
+  # 模型改为进程内单例缓存（按 model_size+device+compute_type 键控），不再每次调用重复加载
+  whisper:
+    model_size: small       # tiny/base/small/medium/large-v3（small 平衡质量与速度；medium 更准但慢2-3倍）
+    device: cuda            # RTX 2060 6GB 实测可用（DLL 从下方 cuda_dll_dirs 注入）；失败自动回退 cpu+int8
+    compute_type: float16   # GPU 用 float16；CPU 用 int8（最快）
+    beam_size: 5            # 解码 beam 宽度，越大越准越慢（5 平衡，10 最准）
+    vad_filter: true        # 启用 VAD 静音过滤，提升字幕对齐精度
+    download_root: ""       # 模型下载根目录（空则用 ~/AppData/Local/cache 或 HuggingFace 默认）
+    # Windows 下 ctranslate2 CUDA 需要 cublas64_12 + cudnn*_9 DLL。
+    # 主 venv 是 torch-CPU 不带这些 DLL，复用 VoxCPM venv 里 torch-cu124 自带的全套。
+    # 目录不存在或加载失败时自动回退 CPU，不影响原路径。
+    cuda_dll_dirs:
+      - ../VoxCPM/.venv/Lib/site-packages/torch/lib
+    # 热词：提示 whisper 关注特定词汇，减少专有名词/术语识别错误
+    # 例："脓毒症 造影 动脉 医疗事故 卫健局"
+    hotwords: "脓毒症 造影 动脉 医疗事故 卫健局 立案 调查 鉴定"
+  # 字幕基础样式
+  subtitle:
+    font_size: 24
+    font_color: "&HFFFFFF"
+    outline_color: "&H000000"
+    outline_width: 2
+    max_chars_per_line: 18
+
+# 字幕高级样式与效果（对标剪映/Sayatoo/腾讯智影）
+subtitle:
+  # 样式预设：douyin_hot(抖音爆款黄字) / minimal_white / tech_blue / classic_gold / pop_pink / news_red
+  preset: douyin_hot
+  # 入场动画：none / fade / slide / zoom / bounce / typewriter / karaoke
+  animation: fade
+  # 字体名称（系统字体）
+  font_name: "Source Han Sans CN"
+  # 字号（1080x1920 下 56 较醒目，对标剪映抖音爆款）
+  font_size: 56
+  # 主色（ASS 格式 &HBBGGRR）
+  primary_color: "&H00FFFFFF"
+  # 描边色
+  outline_color: "&H00000000"
+  # 描边宽度
+  outline_width: 2
+  # 阴影色
+  shadow_color: "&H80000000"
+  # 阴影距离
+  shadow_distance: 1
+  # 字间距
+  letter_spacing: 0
+  # 行高倍数
+  line_spacing: 1.2
+  # 位置：top / center / bottom
+  position: bottom
+  # 水平对齐：left / center / right
+  alignment: center
+  # 垂直边距（像素，120 避开手机底部手势区）
+  margin_v: 120
+  # 双行字幕（长句自动折行）
+  dual_line: true
+  # 卡拉OK逐字点亮（开启后配合 whisper 词级时间戳，逐字高亮按真实发音时长）
+  karaoke: true
+  # 加粗
+  bold: true
+  # 斜体
+  italic: false
+
+# 数字人场景设置（对标腾讯智影/HeyGen）
+scene:
+  # 姿态预设：standing / sitting / half_body / closeup
+  pose: half_body
+  # 水平位置：left / center / right
+  position: center
+  # 数字人大小（0.5-2.0，1.0 为原始）
+  scale: 1.0
+  # 背景类型：transparent / solid / image / green_screen
+  background_type: transparent
+  # 纯色背景色（#RRGGBB）
+  background_color: "#1A1A2E"
+  # 背景图片路径
+  background_image: ""
+  # 是否显示 Logo
+  show_logo: false
+  # Logo 位置：top_left / top_right / bottom_left / bottom_right
+  logo_position: top_right
+  # Logo 路径
+  logo_image: ""
+
+# 音频效果设置（对标剪映/腾讯智影）
+audio:
+  # 语速（0.5-2.0，1.0 为正常）
+  speed: 1.0
+  # 音量（0-200，100 为正常）
+  volume: 100
+  # 音高（-12 到 +12 半音）
+  pitch: 0
+  # 情感：neutral / calm / excited / gentle / serious / cheerful
+  emotion: neutral
+  # 句间停顿（秒）
+  pause_duration: 0.5
+  # 自动去除静音
+  remove_silence: true
+  # 人声增强
+  voice_enhance: true
+  # BGM 设置
+  bgm:
+    # 是否启用 BGM
+    enabled: true
+    # BGM 曲目（从 bgm_library 选择）
+    track: "soft_piano"
+    # BGM 音量（0-100，建议 20-30，口播人声为主，BGM 作为背景陪衬）
+    volume: 25
+    # 淡入时长（秒）
+    fade_in: 1.0
+    # 淡出时长（秒）
+    fade_out: 1.0
+
+# 视频效果设置（对标 vsub/剪映）
+effects:
+  # 转场效果：none / fade / slide / zoom / swipe
+  transition: fade
+  # 转场时长（秒）
+  transition_duration: 0.5  # 滤镜：none / warm / cool / bw / vintage / vivid
+  filter: none
+  # 滤镜强度（0-100）
+  filter_intensity: 50
+  # 水印
+  watermark:
+    enabled: false
+    text: "FreeVideoAI"
+    position: bottom_right
+    opacity: 50
+  # 片头
+  intro:
+    enabled: false
+    text: ""
+    duration: 2.0
+  # 片尾
+  outro:
+    enabled: false
+    text: "关注点赞支持一下"
+    duration: 2.0
+
+# BGM 素材库（预设曲目）
+bgm_library:
+  soft_piano:
+    label: "轻柔钢琴"
+    mood: "舒缓"
+    duration: 180
+  upbeat_corporate:
+    label: "企业活力"
+    mood: "激昂"
+    duration: 120
+  tech_electronic:
+    label: "科技电子"
+    mood: "科技"
+    duration: 150
+  warm_acoustic:
+    label: "温暖原声"
+    mood: "温馨"
+    duration: 160
+  chinese_guzheng:
+    label: "古风古筝"
+    mood: "古风"
+    duration: 200
+  news_serious:
+    label: "新闻严肃"
+    mood: "严肃"
+    duration: 140
+
+# 创作模板系统（一键套餐：选一张卡即配好 字幕样式/入场动画/BGM/情感/滤镜/转场 六项，可跳过）
+# 字段取值必须来自 settings_manager 的预设表：
+#   subtitle_preset ∈ SUBTITLE_STYLE_PRESETS  subtitle_animation ∈ SUBTITLE_ANIMATION_PRESETS
+#   bgm_track ∈ bgm_library  emotion ∈ EMOTION_PRESETS  filter ∈ FILTER_PRESETS  transition ∈ TRANSITION_PRESETS
+templates:
+  viral_hook:
+    label: "爆款涨粉"
+    icon: "🔥"
+    description: "大黄字卡点节奏，黄金三秒开头，泛流量涨粉首选"
+    subtitle_preset: douyin_hot
+    subtitle_animation: karaoke
+    bgm_track: upbeat_corporate
+    emotion: excited
+    filter: vivid
+    transition: fadewhite
+  product_intro:
+    label: "种草带货"
+    icon: "🛍️"
+    description: "活力吸睛，好物推荐/开箱试用/直播切片"
+    subtitle_preset: pop_pink
+    subtitle_animation: bounce
+    bgm_track: upbeat_corporate
+    emotion: excited
+    filter: vivid
+    transition: zoomin
+  knowledge_popular:
+    label: "干货科普"
+    icon: "📚"
+    description: "清晰明快，冷知识/实用教程/避坑指南"
+    subtitle_preset: tech_blue
+    subtitle_animation: slide
+    bgm_track: tech_electronic
+    emotion: cheerful
+    filter: vivid
+    transition: slideleft
+  news_broadcast:
+    label: "热点快报"
+    icon: "📰"
+    description: "严肃权威，热点资讯/政策解读/财经早报"
+    subtitle_preset: news_red
+    subtitle_animation: fade
+    bgm_track: news_serious
+    emotion: serious
+    filter: none
+    transition: fade
+  career_talk:
+    label: "职场认知"
+    icon: "💼"
+    description: "冷静克制，职场经验/认知提升/副业思维"
+    subtitle_preset: minimal_white
+    subtitle_animation: slide
+    bgm_track: soft_piano
+    emotion: neutral
+    filter: cinematic
+    transition: slideup
+  emotional_story:
+    label: "情感治愈"
+    icon: "💝"
+    description: "温柔细腻，情感共鸣/治愈短文/晚安电台"
+    subtitle_preset: minimal_white
+    subtitle_animation: fade
+    bgm_track: warm_acoustic
+    emotion: gentle
+    filter: warm
+    transition: dissolve
+  night_story:
+    label: "深夜故事"
+    icon: "🌙"
+    description: "沉浸悬念，民间故事/悬疑夜读/奇闻轶事"
+    subtitle_preset: neon_glow
+    subtitle_animation: typewriter
+    bgm_track: soft_piano
+    emotion: calm
+    filter: noir
+    transition: fadeblack
+  variety_fun:
+    label: "搞笑娱乐"
+    icon: "🎭"
+    description: "综艺花字弹跳感，段子/吐槽/搞笑日常"
+    subtitle_preset: variety_pop
+    subtitle_animation: bounce
+    bgm_track: upbeat_corporate
+    emotion: cheerful
+    filter: summer
+    transition: slidedown
+  chinese_style:
+    label: "国风文化"
+    icon: "🏮"
+    description: "典雅古朴，历史人文/诗词国学/非遗手艺"
+    subtitle_preset: classic_gold
+    subtitle_animation: typewriter
+    bgm_track: chinese_guzheng
+    emotion: calm
+    filter: vintage
+    transition: dissolve
+  tech_review:
+    label: "数码测评"
+    icon: "🔬"
+    description: "硬核极客，新品开箱/参数对比/AI工具实测"
+    subtitle_preset: dark_black
+    subtitle_animation: zoom
+    bgm_track: tech_electronic
+    emotion: neutral
+    filter: cool
+    transition: pixelize
+
+# B-roll 自动生成（空镜混剪，对标参考级口播成片的"不是从头到尾一张脸"）
+# 流程：LLM 把文案切成 口播段/空镜段 → Seedance 云端生成空镜 → 现有 BRollEngine 叠加
+# 默认关：开启需配置 VIDEO_API_BASE、VIDEO_API_KEY 和 VIDEO_MODEL
+broll_auto:
+  enabled: false
+  # 旧版配置兼容字段；中转站的 VIDEO_MODEL 优先
+  model: seedance-2.0-mini
+  # 每条视频最多自动插入几段空镜
+  max_clips: 3
+  # 每段空镜时长（秒，Seedance 按秒计费，别设大）
+  clip_duration: 5
+  # 空镜分辨率
+  resolution: 720p
+  # 插入模式：cut（整段切换，数字人暂离）/ pip（画中画）
+  mode: cut
+  # 任务轮询间隔与总超时（秒）
+  poll_interval: 10
+  poll_timeout: 600
+
+# 多景别切换（零成本提升节奏感：同一口播视频裁近景/中景两个机位，按段落切换）
+# 纯 ffmpeg 裁切+缩放，CPU 轻量操作，任意机器可用
+multicam:
+  enabled: false
+  # 切换间隔（秒）：每隔约多少秒切一次景别（实际按句子边界对齐）
+  switch_interval: 12
+  # 近景裁切比例（裁掉四周的比例，0.25 = 放大到 1.33x）
+  closeup_crop: 0.25
+  # 切换处轻微渐变帧数（0=硬切，抖音节奏建议硬切）
+  fade_frames: 0
+
+# 视频合成配置
+composer:
+  ffmpeg_path: ffmpeg  # 可指定绝对路径
+  # 输出参数
+  output_fps: 30
+  output_resolution: [1080, 1920]
+  video_bitrate: "8M"
+  audio_bitrate: "192k"
+  # BGM 库
+  bgm_dir: ./config/bgm
+  bgm_volume: 0.15  # BGM 音量（0-1）
+
+# 封面生成配置
+cover:
+  mode: frame_overlay  # frame_overlay / sdxl / template
+  # 布局：bottom(人物上2/3+标题下1/3，口播标准) / center / top / full
+  layout: bottom
+  # 模板目录
+  templates_dir: ./config/cover_templates
+  # 字体（空则用系统粗体中文）
+  font_path: ""
+  # 标题最大字数
+  title_max_chars: 18
+
+# 发布配置
+publisher:
+  mode: semi_auto  # auto / semi_auto / manual
+  # Cookie 存储目录
+  cookies_dir: ./config/cookies
+  # 平台配置
+  platforms:
+    bilibili:
+      # 注意：B站"真实上传"当前未启用——依赖 bilibili-api-python 未安装。
+      # 未安装时运行到该路径会跳过并在日志给出原因；
+      # 如需启用：pip install bilibili-api-python
+      enabled: true
+      api_base: https://api.bilibili.com
+    douyin:
+      enabled: false
+      method: playwright
+    kuaishou:
+      enabled: false
+      method: playwright
+    wechat_video:
+      enabled: false
+      method: playwright
+  # 发布间隔（秒），避免频率限制
+  publish_interval: 60
+
+# 文案原创度与风控配置（script_write 之后检测）
+originality:
+  # 是否启用（关闭则跳过该步骤）
+  enabled: true
+  # SimHash 查重相似度阈值（0~1，≥ 视为重复，0.85 约等于海明距离 9 位）
+  simhash_threshold: 0.85
+  # 历史文案库（SQLite，自动创建）
+  history_db: ./workspace_data/originality_history.db
+  # 违禁词库文件（用户可编辑）
+  banned_words_file: ./config/banned_words.txt
+  # 命中违禁词时最多报告多少个
+  banned_words_max_report: 10
+  # 是否启用 LLM 语义级风控（mock 模式自动跳过）
+  llm_risk_check: true
+  # 命中违禁词时是否自动调 LLM 修正（替换为合规表达，避免流程卡死）
+  auto_fix_banned: true
+
+# 编排配置
+pipeline:
+  # 任务数据库
+  db_path: ./workspace_data/jobs.db
+  # 最大重试次数
+  max_retries: 3
+  # 重试退避基数（秒）
+  retry_backoff: 5
+  # 并发数
+  concurrency: 1
+  # 是否启用 GPU 模块（false 时使用 mock）
+  gpu_enabled: false
+
+# GPU 调度配置
+gpu_runner:
+  # 云 GPU 服务地址（TTS + Avatar API）
+  tts_endpoint: http://localhost:9880
+  avatar_endpoint: http://localhost:8010
+  # 健康检查超时
+  health_check_timeout: 10

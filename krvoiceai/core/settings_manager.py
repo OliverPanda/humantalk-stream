@@ -22,6 +22,7 @@ import httpx
 import yaml
 
 from .config import PROJECT_ROOT, _deep_merge, get_config
+from .config_store import config_lock, write_config
 from .logger import get_logger
 
 logger = get_logger().bind(component="settings_manager")
@@ -103,11 +104,7 @@ PROVIDER_PRESETS = {
             "needs_api_key": False,
             "voices": [
                 "zh-CN-XiaoxiaoNeural", "zh-CN-YunxiNeural", "zh-CN-YunjianNeural",
-                "zh-CN-XiaoyiNeural", "zh-CN-YunyangNeural", "zh-CN-XiaohanNeural",
-                "zh-CN-XiaomengNeural", "zh-CN-XiaomoNeural", "zh-CN-XiaoruiNeural",
-                "zh-CN-XiaoshuangNeural", "zh-CN-XiaoxuanNeural", "zh-CN-XiaoyanNeural",
-                "zh-CN-XiaozhenNeural", "zh-CN-YunfengNeural", "zh-CN-YunhaoNeural",
-                "zh-CN-YunxiaNeural", "zh-CN-YunzeNeural",
+                "zh-CN-XiaoyiNeural", "zh-CN-YunyangNeural", "zh-CN-YunxiaNeural",
             ],
         },
         "mock": {
@@ -117,6 +114,11 @@ PROVIDER_PRESETS = {
         },
     },
     "avatar": {
+        "musetalk_api": {
+            "label": "MuseTalk-API 远程（文件上传）",
+            "needs_api_base": True,
+            "needs_api_key": False,
+        },
         "musetalk_local": {
             "label": "MuseTalk 本地（GPU 近实时，失败自动降级 Wav2Lip）",
             "needs_api_base": False,
@@ -525,11 +527,9 @@ class SettingsManager:
                            "broll_auto", "multicam"):
             return {"success": False, "message": f"不允许修改的配置段: {section}", "section": section}
 
-        # 处理掩码字段：若值形如 "sk-x****abcd" 视为未修改，保留原值
-        payload = self._unmask_sensitive(section, payload)
-
-        with self._lock:
+        with self._lock, config_lock(USER_CONFIG_PATH):
             self._load_user_config()  # 重新读取，避免外部修改
+            payload = self._unmask_sensitive(section, payload)
             self._user_data[section] = _deep_merge(
                 self._user_data.get(section, {}), payload
             )
@@ -552,7 +552,7 @@ class SettingsManager:
 
     def reset_section(self, section: str) -> dict[str, Any]:
         """重置某段为默认配置（删除 user_config.yaml 中该段）"""
-        with self._lock:
+        with self._lock, config_lock(USER_CONFIG_PATH):
             self._load_user_config()
             if section in self._user_data:
                 del self._user_data[section]
@@ -563,7 +563,7 @@ class SettingsManager:
 
     def reset_all(self) -> dict[str, Any]:
         """重置全部用户配置"""
-        with self._lock:
+        with self._lock, config_lock(USER_CONFIG_PATH):
             if USER_CONFIG_PATH.exists():
                 USER_CONFIG_PATH.unlink()
             self._user_data = {}
@@ -578,7 +578,7 @@ class SettingsManager:
             # 形如 xxxx****xxxx 视为掩码，未修改
             if isinstance(val, str) and "****" in val:
                 # 读取原值
-                cfg = get_config()
+                cfg = get_config(reload=True)
                 original = cfg.get(f"{section}.api_key", "")
                 payload["api_key"] = original
             # 空字符串视为清空，允许
@@ -588,19 +588,7 @@ class SettingsManager:
 
     def _save_user_config(self) -> None:
         """保存到 user_config.yaml"""
-        USER_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        # 备份
-        if USER_CONFIG_PATH.exists():
-            backup = USER_CONFIG_PATH.with_suffix(".yaml.bak")
-            try:
-                backup.write_bytes(USER_CONFIG_PATH.read_bytes())
-            except Exception:
-                pass
-        with open(USER_CONFIG_PATH, "w", encoding="utf-8") as f:
-            yaml.safe_dump(
-                self._user_data, f,
-                allow_unicode=True, default_flow_style=False, sort_keys=False,
-            )
+        write_config(USER_CONFIG_PATH, self._user_data)
         logger.info(f"用户配置已保存: {USER_CONFIG_PATH}")
 
     # ============ 监听器（热更新） ============
@@ -779,6 +767,18 @@ class SettingsManager:
             from ..modules.omnihuman_client import OmniHumanClient
             ready, reason = OmniHumanClient().available()
             return {"success": ready, "message": "OmniHuman 中转站配置已就绪（真实连通性以首次生成为准）" if ready else reason}
+        if provider == "musetalk_api":
+            from types import SimpleNamespace
+            from ..modules.musetalk_api_client import MuseTalkAPIClient
+            key = payload.get("api_key") or ""
+            if "****" in key:
+                key = get_config().get("avatar.api_key", "")
+            values = {"avatar.api_base": api_base, "avatar.api_key": key}
+            try:
+                data = MuseTalkAPIClient(SimpleNamespace(get=values.get)).health()
+                return {"success": True, "message": f"MuseTalk-API 就绪，GPU: {data.get('gpu_name', '未知')}"}
+            except Exception as exc:
+                return {"success": False, "message": f"MuseTalk-API 连接失败: {exc}"}
         if not api_base:
             return {"success": False, "message": "服务地址未填写"}
 

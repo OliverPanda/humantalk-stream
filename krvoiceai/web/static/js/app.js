@@ -819,6 +819,7 @@ function renderWizardTemplateGrid(templates) {
 
 // 生成引擎选择（向导第2步）：读/写全局 avatar.provider，切换即热生效（后端设置监听器会重建引擎）
 const WIZ_ENGINE_HINTS = {
+  musetalk_api: '使用远程 GPU 生成口型视频。先到模型配置 → 数字人模型填写 MuseTalk-API 地址并测试连接，人物素材会自动上传。',
   musetalk_local: '本地 GPU 生成，免费。想让身体也动起来：注册形象时上传 10-30 秒说话视频而非照片。',
   omnihuman_api: '云端生成，表情/手势/运镜全驱动，效果最接近真人；约 1 元/秒、单段音频 ≤60 秒。表演提示词可在 设置→模型配置→数字人 微调。',
 };
@@ -3239,10 +3240,11 @@ async function handleRegisterVoice() {
 const TIER_INFO = {
   cloud: { label: '云端档', desc: '未检测到可用独显——本地重模型已锁定；云端引擎（即梦数字人 / Seedance 空镜）不受影响' },
   lite: { label: '标准档', desc: '4-16GB 显卡：音色克隆 + MuseTalk 数字人在本机运行；更重的本地模型已锁定，防止显存不足拖垮任务' },
-  pro: { label: '旗舰档', desc: '≥16GB 大显存：全部本地模型可解锁运行' },
+  pro: { label: '旗舰档', desc: '≥16GB 大显存：按每个模型的实际显存门槛解锁，LatentSync 仍需 ≥18GB' },
 };
 
 async function loadHardwareProfile() {
+  loadInstallationStatus();
   const badge = document.getElementById('hw-tier-badge');
   const summary = document.getElementById('hw-summary');
   const catalog = document.getElementById('model-catalog');
@@ -3258,8 +3260,8 @@ async function loadHardwareProfile() {
     summary.innerHTML = `<strong>${gpuDesc}</strong> — ${info.desc}`;
     catalog.innerHTML = (hw.models || []).map(m => {
       let stateBadge, stateClass;
-      if (!m.allowed) { stateBadge = '需' + (TIER_INFO[m.tier] ? TIER_INFO[m.tier].label : m.tier); stateClass = 'locked'; }
-      else if (m.installed) { stateBadge = m.disk_gb ? '已安装' : '内置'; stateClass = 'installed'; }
+      if (!m.allowed) { stateBadge = `需 ${m.min_vram_gb}GB 显存及对应档位`; stateClass = 'locked'; }
+      else if (m.installed) { stateBadge = m.disk_gb ? '环境与权重已就位' : '内置'; stateClass = 'installed'; }
       else { stateBadge = '未安装'; stateClass = 'missing'; }
       return `
         <div class="model-card ${m.allowed ? '' : 'model-locked'}">
@@ -3276,6 +3278,54 @@ async function loadHardwareProfile() {
     if (window.lucide) lucide.createIcons();
   } catch (e) {
     if (summary) summary.textContent = `硬件检测失败: ${e.message}`;
+  }
+}
+
+let installationPollTimer = null;
+
+async function loadInstallationStatus() {
+  const summary = document.getElementById('installation-summary');
+  const button = document.getElementById('installation-start');
+  const log = document.getElementById('installation-log');
+  if (!summary || !button || !log) return;
+  try {
+    const data = await api('/api/installation');
+    const labels = { cloud: '轻量版', voice: '本地配音版', standard: '本地标准版', pro: '本地增强版' };
+    const names = (data.models || []).join(' + ') || 'Edge TTS + CPU 字幕，数字人需配置远程 API';
+    const optionalNote = (data.optional_models || []).length ? 'LatentSync / EchoMimic 可按模型卡选装。' : '';
+    summary.textContent = data.reason || `推荐：${labels[data.profile] || data.profile}（${names}）。${optionalNote}` +
+      (data.available ? '安装会下载依赖和权重，首次可能较久。' : '容器部署请在宿主机执行构建脚本，GPU 版需显式加载 compose.gpu.yaml。');
+    button.disabled = !data.available || data.state === 'running';
+    button.textContent = data.state === 'running' ? '正在安装…' : '安装推荐方案';
+    log.hidden = !data.log;
+    log.textContent = data.log || '';
+    if (data.state === 'success') {
+      summary.textContent += ' 安装完成；应用新配置前请重启服务。';
+    } else if (data.state === 'failed') {
+      summary.textContent += ' 安装失败，请检查日志，修复后重试；已下载文件会保留。';
+    }
+    clearTimeout(installationPollTimer);
+    if (data.state === 'running') installationPollTimer = setTimeout(loadInstallationStatus, 3000);
+  } catch (e) {
+    summary.textContent = `无法获取推荐安装方案：${e.message}`;
+  }
+}
+
+async function startRecommendedInstall() {
+  const button = document.getElementById('installation-start');
+  button.disabled = true;
+  try {
+    await api('/api/installation', {
+      method: 'POST',
+      body: JSON.stringify({
+        profile: 'auto',
+        activate: document.getElementById('installation-activate').checked,
+      }),
+    });
+    await loadInstallationStatus();
+  } catch (e) {
+    document.getElementById('installation-summary').textContent = `无法开始安装：${e.message}`;
+    button.disabled = false;
   }
 }
 

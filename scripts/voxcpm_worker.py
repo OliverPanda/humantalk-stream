@@ -4,7 +4,7 @@
 由主项目（FreeVideoAI，torch-CPU venv）通过 subprocess 调用，
 必须用 VoxCPM 专属 venv 的 python 执行（含 torch-CUDA + voxcpm 包）：
 
-    E:/VoxCPM/.venv/Scripts/python.exe voxcpm_worker.py <task.json>
+    <voxcpm 环境的 python> voxcpm_worker.py <task.json>
 
 与 Wav2Lip 同范式：模型每次调用加载一次，合成完进程退出，显存自动释放。
 
@@ -13,7 +13,7 @@ task.json 字段：
     out_wav         必填，输出 wav 绝对路径（模型原生采样率，由调用方再转 16k）
     prompt_wav      可选，克隆参考音频绝对路径（零样本克隆）
     prompt_text     可选，参考音频的转写文本（有 prompt_wav 时必须提供）
-    model_dir       可选，模型目录，默认 E:/VoxCPM/pretrained_models/VoxCPM-0.5B
+    model_dir       可选，默认 workspace_data/runtime/models/VoxCPM-0.5B
     cfg_value       可选，默认 2.0
     inference_timesteps 可选，默认 10
     seed            可选，默认 42
@@ -32,8 +32,10 @@ import os
 import re
 import sys
 import time
+from pathlib import Path
 
-DEFAULT_MODEL = r"E:\VoxCPM\pretrained_models\VoxCPM-0.5B"
+DEFAULT_MODEL = str(Path(__file__).resolve().parents[1]
+                    / "workspace_data/runtime/models/VoxCPM-0.5B")
 RESULT_PREFIX = "VOXCPM_RESULT:"
 
 
@@ -121,11 +123,13 @@ def main() -> None:
 
     import numpy as np
     import soundfile as sf
+    import torch
     from voxcpm import VoxCPM
 
     print(f"[..] loading VoxCPM: {model_dir}", flush=True)
     t0 = time.time()
-    model = VoxCPM.from_pretrained(model_dir, load_denoiser=False)
+    # Disable torch.compile for portability (Windows and cards without Triton support).
+    model = VoxCPM.from_pretrained(model_dir, load_denoiser=False, optimize=False)
     sr = model.tts_model.sample_rate
     load_time = time.time() - t0
     print(f"[ok] loaded {load_time:.1f}s sr={sr}", flush=True)
@@ -135,6 +139,7 @@ def main() -> None:
     chunks, seg_meta = [], []
     t1 = time.time()
     for i, seg in enumerate(segments):
+        torch.manual_seed(seed + i)
         wav = model.generate(
             text=seg,
             prompt_wav_path=prompt_wav,
@@ -143,7 +148,6 @@ def main() -> None:
             inference_timesteps=steps,
             normalize=False,
             denoise=False,
-            seed=seed,
         )
         wav = np.asarray(wav, dtype=np.float32).reshape(-1)
         if chunks:

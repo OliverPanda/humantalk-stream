@@ -22,6 +22,7 @@ dependencies = [
     "requests>=2.31",
     "httpx>=0.25",
     "filelock>=3.12",
+    "edge-tts>=7.3.1",
     # 媒体
     "ffmpeg-python>=0.2",
     "Pillow>=10.0",
@@ -54,7 +55,7 @@ gpu = [
     "torchaudio>=2.1",
 ]
 tts = [
-    "edge-tts>=6.1",  # CPU 降级方案
+    "edge-tts>=7.3.1",  # CPU 降级方案（保留安装 extra 兼容）
 ]
 # 本地增强层（纯 CPU 友好，MX450 2GB 显存可跑）
 local = [
@@ -66,12 +67,16 @@ cloud = [
     "fastapi>=0.110",
     "uvicorn>=0.27",
 ]
+publish = [
+    "bilibili-api-python>=17",
+]
 
 [project.scripts]
 krvoiceai = "krvoiceai.ui.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
+include = ["krvoiceai*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

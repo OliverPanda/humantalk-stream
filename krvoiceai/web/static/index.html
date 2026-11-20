@@ -357,6 +357,11 @@
                 <div class="btn-card-label">云端 · 全身驱动</div>
                 <div class="btn-card-desc">即梦 OmniHuman，表情手势全动，约 1 元/秒</div>
               </button>
+              <button class="btn-card" data-value="musetalk_api" type="button">
+                <div class="btn-card-icon">☁️</div>
+                <div class="btn-card-label">远程 · MuseTalk</div>
+                <div class="btn-card-desc">使用自己部署的 MuseTalk-API</div>
+              </button>
             </div>
             <div class="hint" id="wiz-engine-hint" style="margin-top:8px"></div>
             <div class="form-group" id="wiz-omni-prompt-group" style="display:none;margin-top:10px">
@@ -1689,6 +1694,12 @@
             <span class="badge badge-warning" id="hw-tier-badge">检测中</span>
           </div>
           <div id="hw-summary" style="font-size:13px;color:var(--text-muted);margin-bottom:14px">正在检测显卡...</div>
+          <div style="margin-bottom:14px">
+            <p id="installation-summary" style="font-size:13px;color:var(--text-muted)"></p>
+            <label style="font-size:13px"><input type="checkbox" id="installation-activate"> 安装成功后应用推荐引擎（默认保留已有设置）</label>
+            <button class="btn btn-sm btn-secondary" id="installation-start" onclick="startRecommendedInstall()" disabled>安装推荐方案</button>
+            <pre id="installation-log" hidden style="max-height:240px;overflow:auto;white-space:pre-wrap;font-size:12px"></pre>
+          </div>
           <div class="model-catalog" id="model-catalog"></div>
         </div>
 
@@ -1854,7 +1865,7 @@
                   <option value="zh-CN-YunjianNeural">云健 (男·浑厚)</option>
                   <option value="zh-CN-XiaoyiNeural">晓伊 (女·活泼)</option>
                   <option value="zh-CN-YunyangNeural">云扬 (男·专业)</option>
-                  <option value="zh-CN-XiaohanNeural">晓涵 (女·成熟)</option>
+                  <option value="zh-CN-YunxiaNeural">云夏 (男·活泼)</option>
                 </select>
               </div>
             </div>
@@ -1943,6 +1954,7 @@
               <div class="form-group">
                 <label class="form-label">服务提供商 <span class="hint">默认 MuseTalk 本地 GPU，失败自动降级 Wav2Lip</span></label>
                 <select class="form-select" id="avatar-provider" onchange="onAvatarProviderChange()">
+                  <option value="musetalk_api">MuseTalk-API 远程（文件上传）</option>
                   <option value="musetalk_local">MuseTalk 本地（GPU，默认）</option>
                   <option value="omnihuman_api">OmniHuman 云端（可配置兼容中转站）</option>
                   <option value="latentsync_local">LatentSync 1.6 本地（需 ≥18GB 显存，beta）</option>
@@ -1962,6 +1974,12 @@
             <div class="form-group" id="avatar-api-base-group">
               <label class="form-label">数字人服务地址</label>
               <input class="form-input" id="avatar-api-base" placeholder="http://localhost:8010">
+              <span class="hint">MuseTalk-API 填服务根地址，例如 http://服务器IP:8000，不追加 /generate 或 /v1。</span>
+            </div>
+            <div class="form-group" id="avatar-api-key-group" style="display:none">
+              <label class="form-label">远程服务 API Key（可选，Bearer 鉴权）</label>
+              <input class="form-input" id="avatar-api-key" type="password" autocomplete="off">
+              <span class="hint">原版 MuseTalk-API 无需填写；仅反向代理启用了 Bearer 鉴权时填写。</span>
             </div>
             <div id="avatar-omni-relay-group" style="display:none">
               <div class="form-row">
@@ -2002,7 +2020,7 @@
               </div>
               <div class="form-group">
                 <label class="form-label">超时（秒）</label>
-                <input type="number" class="form-input" id="avatar-timeout" value="300" min="30" max="1800">
+                <input type="number" class="form-input" id="avatar-timeout" value="300" min="30" max="7200">
               </div>
             </div>
             <div class="form-group">

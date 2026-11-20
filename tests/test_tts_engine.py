@@ -68,6 +68,13 @@ def test_mock_synth_empty_text(tts_mock, job_work_dir):
     assert "无文案" in result.error
 
 
+def test_missing_edge_tts_never_returns_silent_success(tts_mock, job_work_dir, monkeypatch):
+    import sys
+    monkeypatch.setitem(sys.modules, "edge_tts", None)
+    with pytest.raises(RuntimeError, match="Edge TTS 未安装"):
+        tts_mock._synth_edge("真实配音", "default", job_work_dir / "edge.wav")
+
+
 def test_mock_timestamps_monotonic(tts_mock, job_work_dir):
     """时间戳单调递增"""
     ctx = JobContext(

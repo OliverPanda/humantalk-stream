@@ -103,11 +103,11 @@ avatar:
   # musetalk_local: 本地 MuseTalk 1.5（GPU 近实时，默认，失败自动降级 wav2lip）
   # omnihuman_api: 经 CV 兼容中转站生成 OmniHuman 数字人
   # latentsync_local / echomimic_local: 4090 级本地档（≥16GB 显存护栏拦截，小卡拒跑）
-  provider: musetalk_local  # musetalk_local / omnihuman_api / latentsync_local / echomimic_local / wav2lip / musetalk / latentsync / echomimic / mock
+  provider: musetalk_local  # musetalk_api / musetalk_local / omnihuman_api / latentsync_local / echomimic_local / wav2lip / musetalk / latentsync / echomimic / mock
   # 云端服务地址（musetalk/latentsync 用）
   api_base: http://localhost:8010
   api_key: ""
-  timeout: 300
+  timeout: 300  # 远程 MuseTalk-API 长视频建议在界面设为 1800 或更高
   # 形象库目录
   avatars_dir: ./config/avatars
   default_avatar: default

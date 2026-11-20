@@ -1,0 +1,24 @@
+# Lightweight defaults. Remote avatar endpoint must be configured before video generation.
+tts:
+  provider: edge_tts
+  edge_voice: zh-CN-XiaoxiaoNeural
+  default_voice: zh-CN-XiaoxiaoNeural
+avatar:
+  provider: musetalk_api
+  api_base: ""
+  timeout: 1800
+asr:
+  provider: whisper_local
+  whisper:
+    model_size: /opt/models/faster-whisper-small
+    device: cpu
+    compute_type: int8
+    cuda_dll_dirs: []
+subtitle:
+  font_name: Noto Sans CJK SC
+cover:
+  font_path: /usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc
+broll_auto:
+  enabled: false
+publisher:
+  mode: semi_auto

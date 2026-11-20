@@ -25,6 +25,10 @@ __pycache__/
 *.egg-info/
 build/
 dist/
+docker/model-cache/*
+!docker/model-cache/.gitkeep
+*.tar
+*.tar.gz
 
 # 系统与编辑器
 .DS_Store

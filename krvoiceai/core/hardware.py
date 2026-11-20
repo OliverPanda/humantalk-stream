@@ -15,7 +15,6 @@ ensure_vram() 做硬拦截，防止在小卡上误跑大模型（显存不够直
 from __future__ import annotations
 
 import subprocess
-from pathlib import Path
 from typing import Any
 
 TIER_ORDER = {"cloud": 0, "lite": 1, "pro": 2}
@@ -54,12 +53,12 @@ def query_gpus() -> list[dict[str, Any]]:
 
 
 def detect_tier(gpus: list[dict[str, Any]] | None = None) -> str:
-    """按最大显存的卡定档。"""
+    """按推理默认使用的 GPU0 定档；不以另一张大卡替代实际运行设备。"""
     if gpus is None:
         gpus = query_gpus()
     if not gpus:
         return "cloud"
-    max_total_gb = max(g["total_mb"] for g in gpus) / 1024
+    max_total_gb = gpus[0]["total_mb"] / 1024
     if max_total_gb >= PRO_MIN_VRAM_GB:
         return "pro"
     if max_total_gb >= LITE_MIN_VRAM_GB:
@@ -101,9 +100,9 @@ def ensure_vram(min_gb: float, feature: str, config=None) -> None:
             f"「{feature}」需要 ≥{min_gb:g}GB 显存的 NVIDIA 显卡，"
             f"当前未检测到可用独显。可改用云端引擎（模型配置页）。"
         )
-    max_total_gb = max(g["total_mb"] for g in gpus) / 1024
+    max_total_gb = gpus[0]["total_mb"] / 1024
     if max_total_gb < min_gb:
-        biggest = max(gpus, key=lambda g: g["total_mb"])
+        biggest = gpus[0]
         raise VramGateError(
             f"「{feature}」需要 ≥{min_gb:g}GB 显存，"
             f"本机 {biggest['name']} 只有 {max_total_gb:.0f}GB——已拦截，不会尝试运行。"
@@ -113,12 +112,36 @@ def ensure_vram(min_gb: float, feature: str, config=None) -> None:
 
 # ============ 模型目录（供"模型管理"页与按档下载） ============
 # disk_gb 为估算安装体积（权重+环境）；min_vram_gb 为运行门槛；
-# tier 为解锁该模型的最低档位。install 字段是目标机器上的安装指引（不在本机执行）。
+# tier 与实际显存共同决定解锁；安装方案由 installation 模块执行。
 
-def _dir_exists(*paths: str) -> bool:
-    # 相对路径锚定 PROJECT_ROOT：服务可能从任意 cwd 启动，安装状态不能随之漂移
-    from .config import resolve_path
-    return all(resolve_path(p).exists() for p in paths)
+def _model_installed(config, model: str) -> bool:
+    """Check configured interpreter and required weights, independent of launch directory."""
+    from .config import Config, resolve_path
+    from .installation import MUSETALK_FILES
+    cfg = config if config is not None else Config.load()
+    if model == "voxcpm":
+        executable = cfg.get("tts.voxcpm.venv_python", "")
+        weights = cfg.get("tts.voxcpm.model_dir", "")
+        if not executable or not weights:
+            return False
+        folder = resolve_path(weights)
+        return resolve_path(executable).is_file() and all(
+            (folder / name).is_file() and (folder / name).stat().st_size > 0
+            for name in ("config.json", "pytorch_model.bin", "audiovae.pth", "tokenizer.json"))
+    prefix = {"musetalk": "avatar.musetalk_local",
+              "latentsync": "avatar.latentsync_local",
+              "echomimic_v3": "avatar.echomimic_local"}[model]
+    executable, repo = cfg.get(prefix + ".env_python", ""), cfg.get(prefix + ".repo_dir", "")
+    if not executable or not repo or not resolve_path(executable).is_file():
+        return False
+    folder = resolve_path(repo)
+    if model == "musetalk":
+        return all((folder / "models" / name).is_file()
+                   and (folder / "models" / name).stat().st_size > 0 for name in MUSETALK_FILES)
+    # These optional third-party models use different checkpoint layouts.
+    return folder.is_dir() and any(
+        path.is_file() for pattern in ("**/*.pth", "**/*.safetensors", "**/*.ckpt")
+        for path in folder.glob(pattern))
 
 
 def get_model_catalog(config=None, profile: dict | None = None) -> list[dict[str, Any]]:
@@ -126,6 +149,9 @@ def get_model_catalog(config=None, profile: dict | None = None) -> list[dict[str
 
     profile 可传入已算好的 get_profile 结果，避免重复跑 nvidia-smi。
     """
+    if config is None:
+        from .config import Config
+        config = Config.load()
     catalog = [
         {
             "id": "voxcpm",
@@ -134,10 +160,10 @@ def get_model_catalog(config=None, profile: dict | None = None) -> list[dict[str
             "tier": "lite",
             "min_vram_gb": 4,
             "disk_gb": 7,
-            "installed": _dir_exists("../VoxCPM"),
+            "installed": _model_installed(config, "voxcpm"),
             "desc": "零样本音色克隆 TTS（学音色+语气+说话习惯），本机 GPU 运行",
-            "install": "git clone https://github.com/OpenBMB/VoxCPM ../VoxCPM，"
-                       "按其 README 建 venv 并下载 VoxCPM-0.5B 权重",
+            "install": "Linux: bash install.sh --profile voice --install\n"
+                       "Windows: powershell -File install.ps1 --profile voice --install",
         },
         {
             "id": "musetalk",
@@ -146,9 +172,12 @@ def get_model_catalog(config=None, profile: dict | None = None) -> list[dict[str
             "tier": "lite",
             "min_vram_gb": 5,
             "disk_gb": 13,
-            "installed": _dir_exists("../MuseTalk", "../musetalk_env"),
+            "installed": _model_installed(config, "musetalk"),
             "desc": "只重绘嘴部区域；配合说话视频参考效果最好。MIT 许可可商用",
-            "install": "见 _upgrade/A2_数字人报告.md：克隆 ../MuseTalk + 建 ../musetalk_env",
+            "install": "Linux: bash install.sh --profile standard --install\n"
+                       "Windows: powershell -File install.ps1 --profile standard --install\n"
+                       "自动安装推荐至少 6GB 显存；安装后保留已有引擎选择，"
+                       "需要切换时添加 --activate。",
         },
         {
             "id": "latentsync",
@@ -157,7 +186,7 @@ def get_model_catalog(config=None, profile: dict | None = None) -> list[dict[str
             "tier": "pro",
             "min_vram_gb": 18,
             "disk_gb": 8,
-            "installed": _dir_exists("../LatentSync"),
+            "installed": _model_installed(config, "latentsync"),
             "desc": "字节开源扩散唇同步，质量高于 MuseTalk 一档；4090 约 10 分钟/分钟",
             "install": "git clone https://github.com/bytedance/LatentSync ../LatentSync，"
                        "按其 README 下载 checkpoints（≥18GB 显存机器）",
@@ -169,7 +198,7 @@ def get_model_catalog(config=None, profile: dict | None = None) -> list[dict[str
             "tier": "pro",
             "min_vram_gb": 12,
             "disk_gb": 6,
-            "installed": _dir_exists("../echomimic_v3"),
+            "installed": _model_installed(config, "echomimic_v3"),
             "desc": "蚂蚁开源 1.3B，音频驱动半身+手势，最接近'全身流畅'的本地方案",
             "install": "git clone https://github.com/antgroup/echomimic_v3 ../echomimic_v3，"
                        "按其 README 下载权重（≥12GB 显存机器）",
@@ -199,6 +228,10 @@ def get_model_catalog(config=None, profile: dict | None = None) -> list[dict[str
     ]
     if profile is None:
         profile = get_profile(config)
+    gpus = profile.get("gpus", [])
+    max_gb = gpus[0]["total_mb"] / 1024 if gpus else 0
     for m in catalog:
-        m["allowed"] = tier_allows(profile["tier"], m["tier"])
+        m["allowed"] = (tier_allows(profile["tier"], m["tier"])
+                        and max_gb >= m["min_vram_gb"])
+        m["installation_check"] = "files"  # Dependency/model loading is verified by installer.
     return catalog

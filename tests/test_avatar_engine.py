@@ -89,6 +89,40 @@ def test_musetalk_unavailable_keeps_provider(isolated_config, mock_gpu):
     assert av.provider == "musetalk"
 
 
+def test_musetalk_api_uses_local_registered_reference(
+    isolated_config, mock_gpu, job_work_dir, audio_file, monkeypatch
+):
+    from PIL import Image
+    isolated_config.set("avatar.provider", "musetalk_api")
+    isolated_config.set("avatar.api_base", "https://remote.example")
+    isolated_config.set("avatar.avatars_dir", str(job_work_dir / "avatars"))
+    isolated_config.set("multicam.enabled", False)
+    isolated_config.set("avatar.micro_motion.enabled", False)
+    ffmpeg = MagicMock(spec=FFmpegRunner)
+    ffmpeg.probe_video_info.return_value = None
+    engine = AvatarEngine(gpu_runner=mock_gpu, ffmpeg=ffmpeg)
+    source = job_work_dir / "person.jpg"
+    Image.new("RGB", (64, 64)).save(source)
+    assert engine.register_avatar("person", source)
+    mock_gpu.call_avatar_register.assert_not_called()
+
+    def generate(client, reference, audio, output, fps):
+        assert reference == engine.avatars_dir / "person" / "reference.jpg"
+        assert audio == audio_file
+        assert client.base == "https://remote.example"
+        output.write_bytes(b"generated")
+        return output
+
+    monkeypatch.setattr(
+        "krvoiceai.modules.musetalk_api_client.MuseTalkAPIClient.generate", generate
+    )
+    ctx = JobContext(work_dir=job_work_dir, audio_path=audio_file, avatar_id="person")
+    result = engine.execute(ctx)
+    assert result.success, result.error
+    assert ctx.metadata["avatar_backend"] == "musetalk_api"
+    mock_gpu.call_avatar.assert_not_called()
+
+
 def test_cloud_generate_success(isolated_config, job_work_dir, audio_file):
     """云端生成成功（mock GPU 响应）"""
     isolated_config.set("avatar.provider", "musetalk")

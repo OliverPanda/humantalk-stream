@@ -1,0 +1,29 @@
+# First-run defaults. Subsequent settings are saved through the Web UI.
+tts:
+  provider: edge_tts
+  edge_voice: zh-CN-XiaoxiaoNeural
+  default_voice: zh-CN-XiaoxiaoNeural
+avatar:
+  provider: musetalk_local
+  musetalk_local:
+    env_python: /opt/musetalk-env/bin/python
+    repo_dir: /opt/MuseTalk
+    worker_script: /app/scripts/musetalk_worker.py
+    batch_size: 4
+    use_float16: true
+  timeout: 1800
+asr:
+  provider: whisper_local
+  whisper:
+    model_size: /opt/models/faster-whisper-small
+    device: cpu
+    compute_type: int8
+    cuda_dll_dirs: []
+subtitle:
+  font_name: Noto Sans CJK SC
+cover:
+  font_path: /usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc
+broll_auto:
+  enabled: false
+publisher:
+  mode: semi_auto

@@ -1,0 +1,7 @@
+# Explicit GPU override: docker compose -f compose.yaml -f compose.gpu.yaml up -d
+services:
+  web:
+    image: freevideoai:gpu
+    gpus: all
+    environment:
+      FREEVIDEOAI_DEFAULT_CONFIG: /opt/freevideoai/default-user.yaml

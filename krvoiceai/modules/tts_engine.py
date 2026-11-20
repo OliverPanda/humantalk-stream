@@ -262,7 +262,8 @@ class TTSEngine(BaseModule):
             mc = self.config.get("tts.moss_nano", {}) or {}
             payload["moss"] = {"builtin_voice": mc.get("builtin_voice", "Junhao")}
         elif provider == "edge_tts":
-            payload["edge_voice"] = self.edge_voice
+            payload["edge_voice"] = voice_id if voice_id.endswith("Neural") else self.edge_voice
+            payload["edge_pcm_revision"] = 2  # 旧缓存可能是缺依赖时生成的占位静音
         # 自定义音色把样本文件签名(mtime+size)纳入键：
         # 重新注册同名音色后旧缓存自动失效，否则新样本永远不生效
         sample = self._find_voice_sample(voice_id)
@@ -889,8 +890,9 @@ class TTSEngine(BaseModule):
         try:
             import edge_tts
         except ImportError as e:
-            self.logger.warning("edge-tts 未安装，降级到 mock")
-            return self._synth_mock(text, voice_id, output_path)
+            raise RuntimeError(
+                "Edge TTS 未安装，请在项目环境执行 python -m pip install 'edge-tts>=7.3.1'"
+            ) from e
 
         # 构造 edge-tts 的 rate/volume/pitch 参数字符串
         kwargs: dict = {}
@@ -905,32 +907,35 @@ class TTSEngine(BaseModule):
             pitch_hz = pitch * 4
             kwargs["pitch"] = f"{pitch_hz:+d}Hz"
 
+        voice = voice_id if voice_id.endswith("Neural") else self.edge_voice
         self.logger.info(
-            f"edge-tts 合成 voice={self.edge_voice} "
+            f"edge-tts 合成 voice={voice} "
             f"speed={speed} volume={volume} pitch={pitch} "
             f"kwargs={kwargs}"
         )
 
         async def _synth():
-            communicate = edge_tts.Communicate(text, self.edge_voice, **kwargs)
-            await communicate.save(str(output_path))
+            communicate = edge_tts.Communicate(text, voice, **kwargs)
+            await communicate.save(str(mp3_path))
 
-        asyncio.run(_synth())
+        import tempfile
+        from ..core.ffmpeg_utils import FFmpegRunner
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="freevideoai_tts_") as temp_dir:
+            mp3_path = Path(temp_dir) / "speech.mp3"
+            try:
+                asyncio.run(_synth())
+            except edge_tts.exceptions.NoAudioReceived as e:
+                raise RuntimeError(
+                    f"Edge TTS 未返回音频，音色 {voice} 可能不可用；"
+                    "请在语音配置选择 zh-CN-XiaoxiaoNeural 或检查网络"
+                ) from e
+            FFmpegRunner().convert_audio(mp3_path, output_path, sample_rate=24000)
 
-        # edge-tts 不直接返回时间戳，按分句估算
-        segments = split_text_to_segments(text)
-        timestamps = []
-        offset = 0.0
-        for seg in segments:
-            seg_dur = estimate_speech_duration(seg)
-            timestamps.append({
-                "text": seg,
-                "start": round(offset, 3),
-                "end": round(offset + seg_dur, 3),
-            })
-            offset += seg_dur
-
-        duration = get_wav_duration(output_path) if output_path.exists() else offset
+        duration = get_wav_duration(output_path)
+        if duration <= 0:
+            raise RuntimeError("Edge TTS 输出音频为空")
+        timestamps = self._estimate_char_timestamps(text, duration)
         return output_path, duration, timestamps
 
     def _synth_mock(

@@ -1,443 +1,156 @@
-> ⚠️ **历史文档**：本文描述的是项目早期的云 GPU / Docker 部署设计，与当前实际部署不符。
-> 当前为 Windows 单机本地部署（VoxCPM GPU 声音克隆 + MuseTalk 本地数字人，均带 CPU 降级链），
-> 请以根目录 `README.md`、`上手清单.md` 与 `_upgrade/` 目录下的升级报告为准。正文保留仅供参考。
+# FreeVideoAI Pro 部署指南
 
-# FreeVideoAI 部署指南
+本文只介绍 Pro 原生部署，优先使用 Linux x86_64 服务器。
+安装完成后，在 Web 配置 LLM、注册声音与形象即可开始生成。
+快速命令见 [README](../README.md)。
 
-本文档介绍 FreeVideoAI 的三种部署模式：本地 Mock 模式、本地 + 云端 GPU 模式、全 Docker 模式。
+## 1. 服务器要求与安装范围
 
-## 目录
+- 第一张 NVIDIA 显卡总显存至少 18GB，`nvidia-smi` 正常；多卡显存不会合并。
+- Linux x86_64，以下命令适用于 Ubuntu 22.04 / 24.04、Debian 12。
+- 驱动需兼容 VoxCPM 的 PyTorch 2.5.1 cu121 和 MuseTalk 的 PyTorch 2.0.1 cu118。
+- 安装器要求至少 29GiB 可用磁盘；另为下载缓存、任务中间文件与输出视频预留空间。
+- 能访问 PyPI、PyTorch、OpenMMLab、GitHub、Hugging Face、Google Drive 和人脸检测模型下载站点。
 
-- [部署架构](#部署架构)
-- [模式一：本地 Mock 模式（开发/测试）](#模式一本地-mock-模式开发测试)
-- [模式二：本地 + 云端 GPU 模式（推荐生产）](#模式二本地--云端-gpu-模式推荐生产)
-- [模式三：全 Docker 模式](#模式三全-docker-模式)
-- [配置详解](#配置详解)
-- [服务接口](#服务接口)
-- [故障排查](#故障排查)
+Pro 自动安装主程序、VoxCPM-0.5B、MuseTalk 1.5 及对应依赖和权重，
+配置 CPU Whisper 字幕识别、Linux 中文字体和模型路径。
+LatentSync / EchoMimic 仅提供选装指引，需要按模型卡另行安装。
+显存门槛按总显存检查，运行前还需确认没有其他进程大量占用显存。
 
----
+## 2. Linux 安装
 
-## 部署架构
-
-```
-┌─────────────────────────────────────────────────────────┐
-│  本地机器（CPU）                                          │
-│  ┌───────────────────────────────────────────────────┐  │
-│  │  FreeVideoAI App                                    │  │
-│  │  ├── Web UI (8000)  ← 推荐                       │  │
-│  │  ├── Gradio UI (7860) ← 备用                     │  │
-│  │  ├── CLI                                          │  │
-│  │  ├── Pipeline Orchestrator                        │  │
-│  │  └── 9 个模块（mock 模式或调用云端）              │  │
-│  └───────────────────────────────────────────────────┘  │
-└─────────────────┬───────────────────────────────────────┘
-                  │ HTTP API
-                  ▼
-┌─────────────────────────────────────────────────────────┐
-│  云端 GPU 实例                                            │
-│  ┌──────────────────┐  ┌──────────────────┐            │
-│  │ TTS Server (9880)│  │Avatar Server(8010)│            │
-│  │ GPT-SoVITS       │  │ MuseTalk          │            │
-│  └──────────────────┘  └──────────────────┘            │
-└─────────────────────────────────────────────────────────┘
-```
-
-**核心思想**：CPU 任务（文案、字幕、合成、发布）在本地运行，GPU 任务（TTS、数字人）调用云端服务。本地无 GPU 时自动降级到 mock 模式。
-
----
-
-## 模式一：本地 Mock 模式（开发/测试）
-
-适用：开发、测试、无 GPU 环境。所有 GPU 模块使用 mock 实现。
-
-### 1. 安装依赖
+### 准备系统依赖与源码
 
 ```bash
-cd /workspace
-pip install -e ".[dev,tts]"
-```
-
-### 2. 安装 FFmpeg
-
-```bash
-# Ubuntu
-sudo apt-get install -y ffmpeg
-
-# macOS
-brew install ffmpeg
-```
-
-### 3. 启动服务
-
-```bash
-# 启动 Web UI（推荐，现代化界面）
-python -m krvoiceai.ui.cli web --host 0.0.0.0 --port 8000
-
-# 或启动 Gradio UI（备用，精简）
-python -m krvoiceai.ui.cli serve --host 0.0.0.0 --port 7860
-
-# 或使用 CLI 直接生成视频
-python -m krvoiceai.ui.cli run --script "今天分享一个 AI 小技巧" --platform douyin
-```
-
-### 4. 验证
-
-```bash
-# 运行测试
-pytest tests/ -q
-
-# 健康检查
-python -m krvoiceai.ui.cli health
-```
-
----
-
-## 模式二：本地 + 云端 GPU 模式（推荐生产）
-
-适用：实际生产。本地运行 FreeVideoAI，云端 GPU 运行 TTS 和数字人推理。
-
-### 步骤 1：租用云 GPU 实例
-
-推荐平台：
-- **AutoDL**（国内，便宜）：RTX 3090 / 4090，约 ¥1-3/小时
-- **阿里云 GN7**：A10/V100，按量付费
-- **腾讯云 GN7**：T4/V100，按量付费
-
-要求：
-- GPU 显存 ≥ 8GB（推荐 12GB+）
-- CUDA 12.1+
-- Python 3.10+
-- 公网 IP（或端口转发）
-
-### 步骤 2：云端环境一键安装
-
-```bash
-# SSH 到云 GPU 实例
-ssh root@<gpu-ip>
-
-# 克隆项目
-git clone <your-repo-url> krvoiceai
-cd krvoiceai
-
-# 一键安装（约 15-30 分钟）
-bash scripts/setup_cloud_gpu.sh
-```
-
-脚本会自动安装：
-- 系统依赖（ffmpeg, build-essential）
-- Python 3.10 虚拟环境
-- PyTorch (CUDA 12.1)
-- GPT-SoVITS
-- MuseTalk
-- FunASR
-- 预训练模型
-
-### 步骤 3：启动云端服务
-
-```bash
-cd ~/krvoiceai
-source .venv/bin/activate
-
-# 后台启动 TTS 服务
-nohup python -m krvoiceai.api.tts_server --host 0.0.0.0 --port 9880 \
-    > logs/tts.log 2>&1 &
-
-# 后台启动数字人服务
-nohup python -m krvoiceai.api.avatar_server --host 0.0.0.0 --port 8010 \
-    > logs/avatar.log 2>&1 &
-
-# 验证服务
-curl http://localhost:9880/health
-curl http://localhost:8010/health
-```
-
-### 步骤 4：配置本地 FreeVideoAI
-
-编辑本地 `config/default.yaml`：
-
-```yaml
-gpu_runner:
-  tts_endpoint: http://<gpu-ip>:9880
-  avatar_endpoint: http://<gpu-ip>:8010
-
-tts:
-  provider: gpt_sovits
-
-avatar:
-  provider: musetalk
-```
-
-或通过环境变量：
-
-```bash
-export KRVOICEAI_GPU_RUNNER_TTS_ENDPOINT=http://<gpu-ip>:9880
-export KRVOICEAI_GPU_RUNNER_AVATAR_ENDPOINT=http://<gpu-ip>:8010
-export KRVOICEAI_TTS_PROVIDER=gpt_sovits
-export KRVOICEAI_AVATAR_PROVIDER=musetalk
-```
-
-### 步骤 5：注册音色和形象
-
-```bash
-# 注册音色（上传 5-10s 干净人声样本）
-python -m krvoiceai.ui.cli voice register --voice-id myvoice --audio /path/to/sample.wav
-
-# 注册数字人形象（上传 3-10s 正面说话视频）
-python -m krvoiceai.ui.cli avatar register --avatar-id myavatar --video /path/to/ref.mp4
-```
-
-### 步骤 6：生成视频
-
-```bash
-# CLI
-python -m krvoiceai.ui.cli run \
-    --script "今天分享一个 AI 小技巧" \
-    --avatar myavatar \
-    --voice myvoice \
-    --platform douyin
-
-# 或启动 Gradio UI
-python -m krvoiceai.ui.cli serve
-```
-
----
-
-## 模式三：全 Docker 模式
-
-适用：快速部署、环境隔离。
-
-### 1. 构建镜像
-
-```bash
-# 构建本地镜像
-bash scripts/build_docker.sh local
-
-# 构建 GPU 镜像（需在 GPU 机器上）
-bash scripts/build_docker.sh gpu
-```
-
-### 2. 启动服务
-
-**本地服务：**
-
-```bash
-docker-compose up -d local
-```
-
-访问 http://localhost:8000（Web UI 推荐）或 http://localhost:7860（Gradio 备用）
-
-**云端 GPU 服务（在 GPU 机器上）：**
-
-```bash
-docker-compose --profile gpu up -d tts avatar
-```
-
-### 3. 查看日志
-
-```bash
-docker-compose logs -f local
-docker-compose logs -f tts
-docker-compose logs -f avatar
-```
-
----
-
-## 配置详解
-
-所有配置项在 `config/default.yaml`，可通过环境变量覆盖（前缀 `KRVOICEAI_`，全大写，下划线分隔）。
-
-### 关键配置项
-
-| 配置路径 | 说明 | 默认值 |
-|---------|------|--------|
-| `llm.provider` | LLM 提供商 | deepseek |
-| `llm.api_key` | LLM API Key（环境变量 `KRVOICEAI_LLM_API_KEY`） | "" |
-| `tts.provider` | TTS 提供商 | gpt_sovits |
-| `tts.api_base` | TTS 服务地址 | http://localhost:9880 |
-| `avatar.provider` | 数字人提供商 | musetalk |
-| `avatar.api_base` | 数字人服务地址 | http://localhost:8010 |
-| `asr.provider` | ASR 提供商 | funasr |
-| `publisher.mode` | 发布模式 | semi_auto |
-| `pipeline.gpu_enabled` | 是否启用 GPU | false |
-| `gpu_runner.tts_endpoint` | 云端 TTS 地址 | http://localhost:9880 |
-| `gpu_runner.avatar_endpoint` | 云端数字人地址 | http://localhost:8010 |
-
-### LLM 配置示例
-
-```yaml
-llm:
-  provider: deepseek  # deepseek / qwen / openai / mock
-  api_key: ""         # 环境变量 KRVOICEAI_LLM_API_KEY
-  base_url: https://api.deepseek.com/v1
-  model: deepseek-chat
-  temperature: 0.7
-  max_tokens: 2000
-```
-
-获取 DeepSeek API Key：https://platform.deepseek.com/
-
----
-
-## 服务接口
-
-### TTS 服务（端口 9880）
-
-**健康检查：**
-```
-GET /health
-```
-
-**语音合成：**
-```
-POST /api/tts/synthesize
-Content-Type: application/json
-
-{
-    "text": "要合成的文本",
-    "voice_id": "default",
-    "speed": 1.0
-}
-```
-
-响应：
-```json
-{
-    "audio_base64": "<base64 编码的 wav>",
-    "duration": 5.2,
-    "sample_rate": 32000,
-    "voice_id": "default"
-}
-```
-
-**注册音色：**
-```
-POST /api/tts/register_voice
-{
-    "voice_id": "myvoice",
-    "sample_audio_base64": "<base64>"
-}
-```
-
-### 数字人服务（端口 8010）
-
-**健康检查：**
-```
-GET /health
-```
-
-**生成视频：**
-```
-POST /api/avatar/generate
-{
-    "audio_base64": "<base64>",
-    "avatar_id": "default",
-    "output_fps": 25,
-    "output_resolution": [1080, 1920]
-}
-```
-
-**注册形象：**
-```
-POST /api/avatar/register
-{
-    "avatar_id": "myavatar",
-    "reference_video_base64": "<base64>"
-}
-```
-
----
-
-## 故障排查
-
-### 1. TTS 服务无响应
-
-```bash
-# 检查服务状态
-curl http://<gpu-ip>:9880/health
-
-# 查看日志
-tail -f ~/krvoiceai/logs/tts.log
-
-# 常见原因：
-# - GPT-SoVITS 未安装：bash scripts/setup_cloud_gpu.sh
-# - 显存不足：nvidia-smi 查看显存
-# - 模型未下载：bash scripts/download_models.sh
-```
-
-### 2. 数字人服务报错
-
-```bash
-# 检查 MuseTalk 是否加载
-python -c "from musetalk.api import MuseTalkAPI; print('OK')"
-
-# 检查形象是否注册
-ls ~/krvoiceai/config/avatars/
-
-# 常见原因：
-# - MuseTalk 未安装
-# - 形象未注册：python -m krvoiceai.ui.cli avatar register
-# - 参考视频格式不对：需 3-10s 正面说话，分辨率 ≥ 720p
-```
-
-### 3. 本地无法连接云端
-
-```bash
-# 检查网络
-ping <gpu-ip>
-curl http://<gpu-ip>:9880/health
-
-# 常见原因：
-# - 防火墙未开放端口：sudo ufw allow 9880/tcp
-# - 云安全组未配置：在云控制台开放 9880/8010 端口
-# - 服务未启动：ssh 到云端检查进程
-```
-
-### 4. FFmpeg 报错
-
-```bash
-# 检查 ffmpeg
+nvidia-smi
+sudo apt-get update
+sudo apt-get install -y curl ca-certificates git build-essential ffmpeg \
+  libsndfile1 libgl1 libglib2.0-0 fonts-noto-cjk
 ffmpeg -version
+ffprobe -version
 
-# 常见原因：
-# - 未安装：sudo apt-get install ffmpeg
-# - 版本过旧：升级到 4.4+
+git clone https://github.com/OliverPanda/humantalk-stream.git freevideoai
+cd freevideoai
 ```
 
-### 5. 字幕乱码
+已有源码时进入项目根目录即可，使用包含当前安装脚本的版本。
+其他发行版安装对应系统包，并确认中文字体路径可用。
+安装入口会按需下载 uv 与 Python，并为主程序和两个模型创建独立环境，
+无需手动准备系统 Python 虚拟环境。
+
+### 安装 Pro 并应用配置
 
 ```bash
-# 检查字体
-ls config/fonts/
-
-# 下载思源黑体
-bash scripts/download_models.sh  # 包含字体下载
+# 可选：只预览 Pro 计划；可能下载 uv 与 Python，不安装应用和模型
+bash install.sh --profile pro --json
+# 执行安装，并应用本地引擎及路径
+bash install.sh --profile pro --install --activate
 ```
 
----
+`--activate` 会覆盖推荐方案包含的现有字段，例如引擎、模型路径和字幕字体，
+旧配置保存到 `config/user_config.yaml.bak`。已有环境执行前先核对配置。
+不传 `--activate` 时保留已有字段，只补缺失字段，因此可能继续使用原来的引擎。
 
-## 成本估算
+安装器检查依赖、CUDA 并实际加载模型；全部验证通过后才写推荐配置。
+失败时不会应用本次推荐配置，已下载文件保留，修复后重跑同一命令。
+首次耗时主要取决于依赖和权重下载，不要求手动逐项安装 Python 包。
 
-### 云 GPU 成本（按量）
+| 路径 | 内容 |
+|---|---|
+| `workspace_data/runtime/app` | 主程序，Python 3.11 |
+| `workspace_data/runtime/voxcpm` | VoxCPM 独立环境，Python 3.11 |
+| `workspace_data/runtime/musetalk` | MuseTalk 独立环境，Python 3.10 |
+| `workspace_data/runtime/models/VoxCPM-0.5B` | VoxCPM 权重 |
+| `workspace_data/runtime/MuseTalk` | MuseTalk 源码及 `models/` 权重 |
 
-| 平台 | GPU | 价格（¥/小时） | 适用 |
-|------|-----|---------------|------|
-| AutoDL | RTX 3090 | 1.5-2.5 | 推荐，性价比高 |
-| AutoDL | RTX 4090 | 2.5-3.5 | 高质量生成 |
-| 阿里云 | A10 | 4-6 | 企业级 |
-| 腾讯云 | T4 | 2-4 | 入门 |
+## 3. 启动 Web
 
-### 单条视频成本
+安装成功后，在项目根目录执行：
 
-假设每条视频 60 秒：
-- TTS 合成：约 5 秒 GPU 时间
-- 数字人生成：约 30-60 秒 GPU 时间
-- 总计：约 1 分钟 GPU 时间
+```bash
+workspace_data/runtime/app/bin/python start.py --host 0.0.0.0 --port 8000
+```
 
-按 RTX 3090 ¥2/小时计算：**单条视频 GPU 成本约 ¥0.03**
+确保服务器防火墙／云安全组允许客户端访问 8000 端口，
+浏览器打开 `http://服务器IP:8000`。
+仅在服务器本机访问时可省略 `--host`，默认监听 `127.0.0.1`。
+该命令在前台运行，停止后 Web 服务也会退出。
 
-### 优化建议
+## 4. Web 配置与首次生成
 
-1. **批量生成**：一次启动 GPU，批量处理多条视频，分摊启动成本
-2. **闲时关机**：不生成时关闭云 GPU 实例
-3. **使用 mock 模式开发**：开发调试用 mock，正式生成才启动 GPU
+| 页面 | 操作 | 完成标准 |
+|---|---|---|
+| 模型配置 → LLM | 填写服务地址、API Key、模型，测试连接并保存 | LLM 连接测试通过 |
+| 模型配置 → TTS | 确认选择 VoxCPM | 使用安装器生成的本地环境与权重路径 |
+| 模型配置 → 数字人 | 确认选择 MuseTalk 本地 | 使用安装器生成的本地环境、仓库和 worker 路径 |
+| 我的声音 | 上传 5～20 秒干净人声并注册音色 | 创作时可选中该音色 |
+| 我的形象 | 上传正面照片或 10～30 秒说话视频并注册形象 | 创作时可选中该形象 |
+| 开始创作 | 选择声音与形象，输入 5～10 秒短文案并生成 | 配音可听、嘴型视频正常、中文字幕与封面显示正常 |
+
+**本地 VoxCPM 和 MuseTalk 无需填写远程 TTS／数字人 API 地址或密钥。**
+安装器已填写模型路径，一般无需手动修改。
+参考说话视频可以保留身体动作，建议优先于单张照片。
+
+基础口播只需配置实际使用的 LLM；AI 空镜、AI 生成形象属于可选功能，
+启用时再填写视频中转站配置。LLM 和这些云端功能需要联网。
+CPU Whisper small 权重会在首次字幕识别时下载，首次生成可能比后续慢。
+先串行完成一条短视频验证，再生成完整内容。
+
+## 5. 配置保存、备份与重启
+
+生效优先级：环境变量 > `config/user_config.yaml` > `config/default.yaml`。
+原生部署默认加载根目录 `.env`，可通过 `FREEVIDEOAI_ENV_FILE` 指定环境文件。
+优先在 Web 或用户配置文件修改设置，避免直接改内置默认值。
+网页保存仍不生效时，检查 `.env` 与进程环境中的同名变量，调整后重启服务。
+
+安装器写配置、网页保存、重置单段和重置全部共用
+`config/user_config.yaml.lock` 跨进程锁；读取、合并和保存／删除串行执行。
+保存采用同目录临时文件原子替换，写入失败时保留原配置。
+锁文件正常结束后可以保留，不要在操作期间删除；外部编辑器不参与此锁协议。
+
+保存前备份到 `config/user_config.yaml.bak`，只保留最近一次保存前的版本。
+“重置全部”删除用户配置，不会额外生成备份。
+恢复前先停止 Web 服务与安装任务，再执行：
+
+```bash
+cp config/user_config.yaml.bak config/user_config.yaml
+```
+
+重新运行上面的启动命令即可，模型环境和权重无需重装。
+完整数据备份还应包含 `.env`（或自定义环境文件）、`config/`、
+`workspace_data/` 和 `output/`；单个 YAML 备份不包含素材、任务与作品。
+
+原生 Web 的“模型配置 → 本机算力与模型库”也可安装推荐方案。
+满足 Pro 条件时会推荐 Pro；需切换已有配置时勾选“应用推荐引擎”，完成后重启服务。
+网页安装日志为 `workspace_data/runtime/install.log`，命令行安装直接输出日志。
+安装任务通过 `workspace_data/runtime/install.lock` 互斥。
+
+## 6. Windows Pro（次选）
+
+同样要求第一张 NVIDIA 显卡总显存至少 18GB、驱动正常。
+先安装可从 PATH 调用的 Python/pip、Git、FFmpeg 与 ffprobe，再进入项目根目录：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1 --profile pro --install --activate
+.\workspace_data\runtime\app\Scripts\python.exe start.py --host 0.0.0.0 --port 8000
+```
+
+Web 配置和首次验证步骤相同；各环境解释器使用 `Scripts/python.exe`。
+MuseTalk 仍依赖上游 Windows wheel，缺失 wheel 或模型加载失败时安装会终止。
+GPU 服务器部署优先选择 Linux。
+恢复配置时使用 `Copy-Item config/user_config.yaml.bak config/user_config.yaml`。
+
+## 7. 故障排查
+
+| 现象 | 处理 |
+|---|---|
+| Pro 显存检查失败 | 确认第一张卡至少 18GB；多卡显存不相加，检查 `nvidia-smi` |
+| 缺少 FFmpeg／中文字体 | 安装系统依赖，确认 `ffmpeg`、`ffprobe` 和中文字体文件存在 |
+| CUDA 验证失败 | 检查驱动与两个模型的 PyTorch CUDA 环境兼容性 |
+| 下载失败／Windows wheel 缺失 | 根据失败命令检查网络或平台兼容性，修复后重跑同一安装命令 |
+| 安装后仍使用旧引擎 | 核对配置后使用 `--activate`，或在 Web 选择 VoxCPM 和 MuseTalk 本地并保存 |
+| Web 访问不到 | 检查启动进程、`--host 0.0.0.0`、端口、防火墙与安全组 |
+| 配置保存后未生效 | 检查 `.env` 和进程环境覆盖，调整后重启 |
+| 首次字幕识别等待较久 | 确认 Whisper 权重下载网络正常 |
+| 生成时显存不足 | 停止其他占用显存的任务，先串行生成短视频 |
+| 提示已有安装任务 | 等待当前任务结束，查看日志；不要删除锁文件绕过互斥 |

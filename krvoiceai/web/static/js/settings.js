@@ -566,6 +566,7 @@ function loadAvatarSettings() {
   onAvatarProviderChange();
   document.getElementById('avatar-default').value = avatar.default_avatar || 'default';
   document.getElementById('avatar-api-base').value = avatar.api_base || '';
+  document.getElementById('avatar-api-key').value = avatar.api_key || '';
   document.getElementById('avatar-omni-prompt').value = (avatar.omnihuman && avatar.omnihuman.prompt) || '';
   document.getElementById('avatar-fps').value = avatar.output_fps || 25;
   document.getElementById('avatar-timeout').value = avatar.timeout || 300;
@@ -584,6 +585,8 @@ function onAvatarProviderChange() {
   if (omniPromptGroup) omniPromptGroup.style.display = provider === 'omnihuman_api' ? 'block' : 'none';
   document.getElementById('avatar-omni-relay-group').style.display =
     provider === 'omnihuman_api' ? 'block' : 'none';
+  document.getElementById('avatar-api-key-group').style.display =
+    provider === 'musetalk_api' ? 'block' : 'none';
   // 自动填充默认地址
   if (_presets && _presets.avatar[provider]) {
     const preset = _presets.avatar[provider];
@@ -614,6 +617,7 @@ async function saveAvatarSettings() {
     provider,
     default_avatar: document.getElementById('avatar-default').value,
     api_base: document.getElementById('avatar-api-base').value,
+    api_key: document.getElementById('avatar-api-key').value,
     output_fps: parseInt(document.getElementById('avatar-fps').value),
     timeout: parseInt(document.getElementById('avatar-timeout').value),
     output_resolution: [
@@ -669,6 +673,7 @@ async function testAvatarConnection() {
   const payload = {
     provider: document.getElementById('avatar-provider').value,
     api_base: document.getElementById('avatar-api-base').value,
+    api_key: document.getElementById('avatar-api-key').value,
   };
   const btn = document.getElementById('avatar-test-btn');
   btn.disabled = true;

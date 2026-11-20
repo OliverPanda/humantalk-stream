@@ -105,6 +105,8 @@ class AvatarEngine(BaseModule):
                 self.logger.warning(
                     "OmniHuman 中转站未配置地址或密钥，运行时将报错。"
                 )
+        elif self.provider == "musetalk_api":
+            self.logger.info(f"数字人模块使用 MuseTalk-API 远程上传接口: {self.api_base}")
         elif self.provider in ("musetalk", "latentsync", "echomimic"):
             available = self.gpu.health_check_avatar()
             if not available:
@@ -279,6 +281,21 @@ class AvatarEngine(BaseModule):
                         error=f"Wav2Lip 环境未就绪: {reason}",
                     )
                 video_path = self._generate_wav2lip(ctx, avatar_id, output_path)
+            elif self.provider == "musetalk_api":
+                from .musetalk_api_client import MuseTalkAPIClient
+                reference = self._get_avatar_reference(avatar_id)
+                if reference is None:
+                    for name in ("reference.jpg", "reference.png", "preview.jpg"):
+                        candidate = self.avatars_dir / avatar_id / name
+                        if candidate.is_file():
+                            reference = candidate
+                            break
+                if reference is None:
+                    raise RuntimeError(f"形象 {avatar_id} 没有本地参考照片或视频，请先上传形象")
+                video_path = MuseTalkAPIClient(self.config).generate(
+                    reference, ctx.audio_path, output_path, self.output_fps
+                )
+                ctx.metadata["avatar_backend"] = "musetalk_api"
             elif self.provider == "omnihuman_api":
                 # 即梦数字人云端（OmniHuman 全身驱动）。云端失败不静默降级本地
                 # （A4 教训：静默降级会掩盖主档故障），报错并给出人话原因。
@@ -961,7 +978,7 @@ class AvatarEngine(BaseModule):
         avatar_dir.mkdir(parents=True, exist_ok=True)
         reference_video = Path(reference_video)
 
-        if self.provider in ("musetalk_local", "wav2lip", "omnihuman_api",
+        if self.provider in ("musetalk_local", "wav2lip", "omnihuman_api", "musetalk_api",
                              "latentsync_local", "echomimic_local"):
             # 本地保存参考素材（照片或视频）。omnihuman_api 虽是云端生成，
             # 但参考照片同样存本地 avatar_dir（生成时经中转站上传）

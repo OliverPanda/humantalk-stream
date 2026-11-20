@@ -1,0 +1,19 @@
+name: freevideoai
+services:
+  web:
+    image: freevideoai:web
+    ports:
+      - "${FREEVIDEOAI_PORT:-8000}:8000"
+    volumes:
+      - config:/app/config
+      - workspace:/app/workspace_data
+      - output:/app/output
+    init: true
+    restart: unless-stopped
+    shm_size: "1gb"
+    environment:
+      FREEVIDEOAI_DEFAULT_CONFIG: /opt/freevideoai/default-user.cpu.yaml
+volumes:
+  config:
+  workspace:
+  output:

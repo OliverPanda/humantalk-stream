@@ -4,17 +4,17 @@
 
 **一句文案 → 一条带你自己的脸和声音的口播成片。** 本地可运行、按显卡自动分档、云端引擎可选的数字人视频自动化流水线：文案润色 → 声音克隆 → 数字人驱动 → 字幕 → 空镜混剪 → 合成 → 封面标题 → 发布清单，全流程一键。
 
-![tier](https://img.shields.io/badge/GPU-6GB%20%E8%B5%B7%E6%AD%A5-8A6D3F) ![python](https://img.shields.io/badge/python-3.10%2B-3E7C5B) ![license](https://img.shields.io/badge/license-MIT-4A6B8A)
+![tier](https://img.shields.io/badge/GPU-18GB%2B-8A6D3F) ![python](https://img.shields.io/badge/python-3.10%2B-3E7C5B) ![license](https://img.shields.io/badge/license-MIT-4A6B8A)
 
-## ✨ 三条引擎路线，按你的机器自动分档
+## ✨ Pro 本地部署
 
-启动时自动检测显卡定档，不够档的重模型**在代码层被硬性锁定**（不会 OOM 拖垮任务）：
+本文部署流程面向第一张 NVIDIA 显卡总显存至少 18GB 的 Linux x86_64 服务器。
+Pro 安装器自动部署 **VoxCPM-0.5B 声音克隆 + MuseTalk 1.5 本地数字人**，
+并配置 CPU Whisper 字幕识别、中文字体和模型路径。
+安装完成后，在 Web 配置 LLM、注册声音与形象，即可开始生成。
 
-| 档位 | 硬件 | 数字人引擎 | 1 分钟口播耗时 | 成本 |
-|---|---|---|---|---|
-| **云端档** | 无独显也行 | 即梦数字人 OmniHuman（全身驱动，最流畅） | 排队+生成数分钟 | 1 元/秒 |
-| **标准档** | 4-16GB（如 RTX 2060） | VoxCPM 音色克隆 + MuseTalk 嘴型 | ~8 分钟 | 免费 |
-| **旗舰档** | ≥16GB（如 RTX 4090） | + LatentSync 1.6 / EchoMimic V3 本地（beta） | 1-10 分钟 | 免费 |
+LatentSync / EchoMimic 需按模型卡指引另行安装，不包含在 Pro 自动安装中。
+实际推理还需预留空闲显存；LLM 和可选云端功能需要联网。
 
 ## 🎬 核心特性
 
@@ -26,33 +26,49 @@
 - **完整后期**：词级卡拉OK字幕、BGM、滤镜转场、封面标题自动生成、多平台发布清单
 - **工程化**：SQLite 状态机断点续跑、TTS 结果缓存、每阶段子进程独占 GPU 用完即还、降级链全程日志留痕
 
-## 🚀 快速开始
+## 🚀 Pro 快速部署（Linux 优先）
+
+以 Ubuntu 22.04 / 24.04 或 Debian 12 为例，先确认 NVIDIA 驱动正常，
+第一张卡总显存至少 18GB。首次安装需要下载依赖和权重。
 
 ```bash
-git clone https://github.com/333kjp/freevideoai && cd freevideoai
-python -m venv .venv && .venv\Scripts\activate     # Windows
-pip install -e .
+nvidia-smi
+sudo apt-get update
+sudo apt-get install -y curl ca-certificates git build-essential ffmpeg \
+  libsndfile1 libgl1 libglib2.0-0 fonts-noto-cjk
 
-cp .env.example .env        # 按需填密钥（LLM 必填，云端引擎可选）
-python start.py
+git clone https://github.com/OliverPanda/humantalk-stream.git freevideoai
+cd freevideoai
+# 自动安装依赖和权重，验证通过后应用本地引擎及路径
+bash install.sh --profile pro --install --activate
+# 安装成功后再启动
+workspace_data/runtime/app/bin/python start.py --host 0.0.0.0 --port 8000
 ```
 
-打开 http://127.0.0.1:8000 ：
+已有源码时进入包含本次安装脚本的项目目录即可，无需再次克隆。
+`--activate` 会覆盖推荐方案包含的现有字段，保存前备份为
+`config/user_config.yaml.bak`；已有环境执行前先核对配置。
+服务器需允许客户端访问 8000 端口，然后打开 `http://服务器IP:8000`：
 
-1. **我的声音**：上传一段自己的人声 → 注册音色（即点即听原声）
-2. **我的形象**：上传正面照片或 10-30 秒说话视频（视频效果远好于照片）
-3. **开始创作**：输入文案 → 一键生成 → 制片间看进度 → 我的作品里回看下载
+1. **模型配置 → LLM**：填写服务地址、API Key 和模型，测试连接并保存。
+2. **模型配置 → TTS／数字人**：确认分别为 **VoxCPM**、**MuseTalk 本地**；路径已自动填写，无需远程数字人 API。
+3. **我的声音／我的形象**：上传 5～20 秒干净人声注册音色，上传正面照片或 10～30 秒说话视频注册形象。
+4. **开始创作**：选择声音和形象，先用 5～10 秒短文案生成验证，再生成完整内容。
 
-> 不装任何本地模型也能跑通：LLM + edge-tts + 云端数字人（模型配置 → 数字人模型中填写中转站配置）。本地模型（VoxCPM/MuseTalk）的安装指引见「模型配置 → 本机算力与模型库」每张模型卡。
+基础口播无需配置视频中转站；使用 AI 空镜或 AI 生成形象时再配置。
+首次字幕识别可能下载 Whisper 权重。完整步骤、Windows Pro 安装、
+配置恢复和故障排查见 [Pro 部署指南](docs/DEPLOYMENT.md)。
 
 ## ⚙️ 配置
 
 **全部配置可在 Web 界面完成**（模型配置页，保存即热生效）；等价的文件入口：
 
 - `.env` — 密钥与中转站地址，模板见 `.env.example`
-- `config/default.yaml` — 引擎选择、硬件分档覆盖、字幕/BGM/滤镜、空镜与多景别开关，每项有注释
+- `config/default.yaml` — 内置默认值及字段说明
+- `config/user_config.yaml` — 网页与安装器保存的用户覆盖配置，部署时优先修改此文件
 
 注意：`.env` 中 `KRVOICEAI_*` 变量优先级高于界面设置（适合部署固化）；界面改了不生效时先检查 `.env`。
+文件配置按“默认配置 → 用户配置 → 环境变量”覆盖，原生部署默认加载根目录 `.env`。
 
 ### 视频中转站
 

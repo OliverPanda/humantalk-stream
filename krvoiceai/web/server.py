@@ -9,7 +9,7 @@ import json
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -36,6 +36,10 @@ def _get_app() -> FreeVideoAI:
 
 
 # ============ 请求模型 ============
+
+class InstallationRequest(BaseModel):
+    profile: Literal["auto", "cloud", "voice", "standard", "pro"] = "auto"
+    activate: bool = False
 
 class GenerateRequest(BaseModel):
     script: str = ""
@@ -80,6 +84,7 @@ class TestTTSRequest(BaseModel):
 class TestAvatarRequest(BaseModel):
     provider: str = "mock"
     api_base: str = ""
+    api_key: str = ""
 
 
 class ScriptProcessRequest(BaseModel):
@@ -188,8 +193,9 @@ def create_app() -> FastAPI:
     )
 
     def _env_path() -> Path:
+        import os
         from ..core.config import PROJECT_ROOT
-        return Path(PROJECT_ROOT) / ".env"
+        return Path(os.environ.get("FREEVIDEOAI_ENV_FILE") or Path(PROJECT_ROOT) / ".env")
 
     @app.get("/api/settings/cloud-keys")
     async def get_cloud_keys():
@@ -315,6 +321,29 @@ def create_app() -> FastAPI:
         profile = hw.get_profile(cfg)
         profile["models"] = hw.get_model_catalog(cfg, profile=profile)
         return profile
+
+    @app.get("/api/installation")
+    def installation_status():
+        from ..core import installation, installation_jobs
+        from ..core.config import PROJECT_ROOT
+        from ..core.hardware import query_gpus
+        try:
+            plan = installation.make_plan(Path(PROJECT_ROOT), "auto", query_gpus())
+        except ValueError as exc:
+            return {"available": False, "reason": str(exc), **installation_jobs.status()}
+        return {
+            "available": installation_jobs.native_available(),
+            "profile": plan["profile"], "models": plan["models"],
+            "optional_models": plan["optional_models"], **installation_jobs.status(),
+        }
+
+    @app.post("/api/installation")
+    def start_installation(req: InstallationRequest):
+        from ..core import installation_jobs
+        try:
+            return installation_jobs.start(req.profile, req.activate)
+        except (ValueError, RuntimeError, OSError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.post("/api/generate")
     async def generate(req: GenerateRequest):

@@ -52,13 +52,23 @@ class Config:
             load_dotenv(env_file)
         else:
             # 自动加载项目根目录 .env（若存在）
-            auto_env = PROJECT_ROOT / ".env"
+            auto_env = Path(os.environ.get("FREEVIDEOAI_ENV_FILE") or PROJECT_ROOT / ".env")
             if auto_env.exists():
                 load_dotenv(auto_env)
 
         # 加载默认配置
         with open(DEFAULT_CONFIG_PATH, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f)
+        # YAML retains the historical Windows examples; adapt defaults before user
+        # overrides so explicit paths are never rewritten.
+        if os.name != "nt":
+            for group in ("tts", "avatar"):
+                for options in data.get(group, {}).values():
+                    if isinstance(options, dict):
+                        for key in ("venv_python", "env_python"):
+                            value = options.get(key)
+                            if isinstance(value, str) and value.endswith("/Scripts/python.exe"):
+                                options[key] = value.removesuffix("/Scripts/python.exe") + "/bin/python"
 
         # 确定用户配置文件路径：优先使用显式传入的，否则自动加载 user_config.yaml
         user_paths: list[Path] = []

@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 
 from .hardware import query_gpus
+from .downloads import download_environment, github_url, torch_index
 
 PROFILE_MIN_MB = {"cloud": 0, "voice": 4096, "standard": 6144, "pro": 18432}
 MUSETALK_REV = "2536eaf06b85f775d8e04b7fd81bf6699155a58d"
@@ -96,7 +97,7 @@ def make_plan(root: Path, requested: str, gpus: list[dict], *,
 def run(argv: list[str | Path], *, cwd: Path | None = None) -> None:
     args = [str(x) for x in argv]
     print("+ " + subprocess.list2cmdline(args), flush=True)
-    subprocess.run(args, cwd=cwd, check=True)
+    subprocess.run(args, cwd=cwd, check=True, env=download_environment())
 
 
 def uv_command() -> list[str]:
@@ -167,7 +168,7 @@ def install_voxcpm(plan: dict) -> None:
     executable = create_env(runtime / "voxcpm", "3.11")
     # Separate environment: MuseTalk needs torch 2.0, VoxCPM requires >=2.5.
     pip_install(executable, "torch==2.5.1", "torchaudio==2.5.1",
-                "--index-url", "https://download.pytorch.org/whl/cu121")
+                "--index-url", torch_index("cu121"))
     pip_install(executable, "voxcpm==1.0.5", "transformers==4.51.3",
                 "numpy<2", "gradio<6", "huggingface-hub<1",
                 "torch==2.5.1+cu121", "torchaudio==2.5.1+cu121")
@@ -193,7 +194,8 @@ def install_musetalk(plan: dict) -> None:
         run(["git", "init", repo])
         run(["git", "-C", repo, "remote", "add", "origin",
              "https://github.com/TMElyralab/MuseTalk.git"])
-    run(["git", "-C", repo, "fetch", "--depth", "1", "origin", MUSETALK_REV])
+    run(["git", "-C", repo, "fetch", "--depth", "1",
+         github_url("https://github.com/TMElyralab/MuseTalk.git"), MUSETALK_REV])
     run(["git", "-C", repo, "checkout", "--detach", "FETCH_HEAD"])
     pip_install(executable, "pip==24.3.1", "setuptools==68.2.2", "wheel==0.45.1")
     # Shared with Docker; avoid maintaining two subtly different dependency sets.

@@ -1,15 +1,27 @@
 ARG WEB_IMAGE=freevideoai:web
 FROM ${WEB_IMAGE}
+ARG FREEVIDEOAI_DOWNLOAD_SOURCE=china
+ARG PIP_INDEX_URL
+ARG UV_INDEX_URL
+ARG HF_ENDPOINT
+ARG UV_PYTHON_INSTALL_MIRROR
+ARG FREEVIDEOAI_TORCH_INDEX
+ARG FREEVIDEOAI_GITHUB_MIRROR
+ARG FREEVIDEOAI_MMCV_INDEX
+ENV FREEVIDEOAI_DOWNLOAD_SOURCE=${FREEVIDEOAI_DOWNLOAD_SOURCE}
 USER root
 RUN apt-get update && apt-get install -y --no-install-recommends git libgl1 libglib2.0-0 build-essential && rm -rf /var/lib/apt/lists/*
 RUN pip install --no-cache-dir uv && uv python install 3.10 && uv venv --python 3.10 --seed /opt/musetalk-env
 RUN /opt/musetalk-env/bin/pip install --no-cache-dir pip==24.3.1 setuptools==68.2.2 wheel==0.45.1
 ARG MUSETALK_REV=2536eaf06b85f775d8e04b7fd81bf6699155a58d
-RUN git init /opt/MuseTalk && cd /opt/MuseTalk && git remote add origin https://github.com/TMElyralab/MuseTalk.git && git fetch --depth 1 origin "${MUSETALK_REV}" && git checkout --detach FETCH_HEAD
-COPY scripts/install_musetalk.py /opt/install_musetalk.py
-RUN /opt/musetalk-env/bin/python /opt/install_musetalk.py --repo /opt/MuseTalk && /opt/musetalk-env/bin/pip check
-COPY docker/download_musetalk_models.py /opt/download_musetalk_models.py
-RUN /opt/musetalk-env/bin/python /opt/download_musetalk_models.py && /opt/musetalk-env/bin/python -c "import torch, cv2, transformers, mmpose, diffusers; from mmcv.ops import nms; print('MuseTalk dependencies loaded:', torch.__version__)"
+RUN git init /opt/MuseTalk && cd /opt/MuseTalk \
+    && git remote add origin https://github.com/TMElyralab/MuseTalk.git \
+    && git fetch --depth 1 "${FREEVIDEOAI_GITHUB_MIRROR:-https://github.com}/TMElyralab/MuseTalk.git" "${MUSETALK_REV}" \
+    && git checkout --detach FETCH_HEAD
+COPY scripts/install_musetalk.py /app/scripts/install_musetalk.py
+RUN /opt/musetalk-env/bin/python /app/scripts/install_musetalk.py --repo /opt/MuseTalk && /opt/musetalk-env/bin/pip check
+COPY docker/download_musetalk_models.py /app/docker/download_musetalk_models.py
+RUN /opt/musetalk-env/bin/python /app/docker/download_musetalk_models.py && /opt/musetalk-env/bin/python -c "import torch, cv2, transformers, mmpose, diffusers; from mmcv.ops import nms; print('MuseTalk dependencies loaded:', torch.__version__)"
 ENV NVIDIA_VISIBLE_DEVICES=all NVIDIA_DRIVER_CAPABILITIES=compute,utility
 ENV FREEVIDEOAI_DEFAULT_CONFIG=/opt/freevideoai/default-user.yaml
 

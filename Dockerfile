@@ -7,6 +7,26 @@ ENV PYTHONUNBUFFERED=1 \
     HF_HOME=/app/workspace_data/huggingface
 
 WORKDIR /app
+ARG FREEVIDEOAI_DOWNLOAD_SOURCE=china
+ARG PIP_INDEX_URL
+ARG UV_INDEX_URL
+ARG HF_ENDPOINT
+ARG UV_PYTHON_INSTALL_MIRROR
+ARG FREEVIDEOAI_TORCH_INDEX
+ARG FREEVIDEOAI_GITHUB_MIRROR
+ARG FREEVIDEOAI_APT_MIRROR
+ARG FREEVIDEOAI_MMCV_INDEX
+ARG PLAYWRIGHT_DOWNLOAD_HOST
+ENV FREEVIDEOAI_DOWNLOAD_SOURCE=${FREEVIDEOAI_DOWNLOAD_SOURCE} \
+    FREEVIDEOAI_MIRROR_CONFIG=/opt/freevideoai/install-mirrors.env \
+    BASH_ENV=/opt/freevideoai/install_sources.sh
+COPY config/install-mirrors.env /opt/freevideoai/install-mirrors.env
+COPY scripts/install_sources.sh /opt/freevideoai/install_sources.sh
+SHELL ["/bin/bash", "-c"]
+RUN if [ -n "${FREEVIDEOAI_APT_MIRROR:-}" ]; then \
+      sed -i "s|http://deb.debian.org|${FREEVIDEOAI_APT_MIRROR}|g; s|http://security.debian.org|${FREEVIDEOAI_APT_MIRROR}|g" \
+        /etc/apt/sources.list.d/debian.sources; \
+    fi
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg fonts-noto-cjk libsndfile1 libgomp1 ca-certificates \
     && rm -rf /var/lib/apt/lists/*

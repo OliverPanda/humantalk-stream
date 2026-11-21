@@ -34,16 +34,39 @@ LatentSync / EchoMimic 需按模型卡指引另行安装，不包含在 Pro 自�
 ```bash
 nvidia-smi
 sudo apt-get update
-sudo apt-get install -y curl ca-certificates git build-essential ffmpeg \
-  libsndfile1 libgl1 libglib2.0-0 fonts-noto-cjk
+sudo apt-get install -y git curl ca-certificates
 
 git clone https://github.com/OliverPanda/humantalk-stream.git freevideoai
 cd freevideoai
+# 使用镜像安装系统依赖；root 用户省略 sudo
+sudo bash scripts/install_system_deps.sh
 # 自动安装依赖和权重，验证通过后应用本地引擎及路径
 bash install.sh --profile pro --install --activate
 # 安装成功后再启动
 workspace_data/runtime/app/bin/python start.py --host 0.0.0.0 --port 8000
 ```
+
+默认启用镜像加速：Python 包走清华源、PyTorch CUDA 包走上海交大源、
+Python 运行时走南京大学源、模型权重走 HF 镜像，MuseTalk 源码走 GitHub 代理。
+配置位于 `config/install-mirrors.env`，已有非空环境变量优先；
+切回官方下载可使用 `FREEVIDEOAI_DOWNLOAD_SOURCE=official bash install.sh --profile pro --install --activate`。
+该开关只停用项目默认镜像，已手动导出的源变量仍需取消。
+MMCV 指定 wheel 保留官方源，可自定义地址；
+源地址、超时和排查步骤见 [镜像配置说明](docs/DEPLOYMENT.md#默认镜像与自定义源)。
+
+**已有服务器安装中断时**，先将包含镜像改动的代码同步到服务器，在项目根目录继续：
+
+```bash
+# 24GB 显存不等于硬盘空间；项目所在磁盘至少需要 29GiB 可用空间
+df -h .
+unset HF_HUB_OFFLINE
+unset TRANSFORMERS_OFFLINE
+set -o pipefail
+bash install.sh --profile pro --install --activate 2>&1 | tee install-pro.log
+```
+
+已有环境、权重和下载缓存保留，无需删除 `workspace_data/runtime/`。
+只有提示安装验证通过后才启动 Web；不要通过单独补装 PyYAML 来替代完整安装。
 
 已有源码时进入包含本次安装脚本的项目目录即可，无需再次克隆。
 `--activate` 会覆盖推荐方案包含的现有字段，保存前备份为
@@ -61,14 +84,16 @@ workspace_data/runtime/app/bin/python start.py --host 0.0.0.0 --port 8000
 
 ## ⚙️ 配置
 
-**全部配置可在 Web 界面完成**（模型配置页，保存即热生效）；等价的文件入口：
+**模型设置可在 Web 界面完成**（模型配置页，保存即热生效）；文件入口：
 
 - `.env` — 密钥与中转站地址，模板见 `.env.example`
 - `config/default.yaml` — 内置默认值及字段说明
 - `config/user_config.yaml` — 网页与安装器保存的用户覆盖配置，部署时优先修改此文件
+- `config/install-mirrors.env` — 安装与模型下载源、超时和重试配置；使用简单的 `KEY=value` 格式
 
 注意：`.env` 中 `KRVOICEAI_*` 变量优先级高于界面设置（适合部署固化）；界面改了不生效时先检查 `.env`。
 文件配置按“默认配置 → 用户配置 → 环境变量”覆盖，原生部署默认加载根目录 `.env`。
+下载源配置独立于 Web 模型设置；不要在镜像配置文件中填写 LLM 密钥。
 
 ### 视频中转站
 

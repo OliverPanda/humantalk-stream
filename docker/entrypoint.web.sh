@@ -1,5 +1,6 @@
 #!/bin/sh
 set -eu
+. /opt/freevideoai/install_sources.sh
 mkdir -p /app/config /app/workspace_data /app/output
 if [ ! -f /app/config/user_config.yaml ]; then
     cp "${FREEVIDEOAI_DEFAULT_CONFIG:-/opt/freevideoai/default-user.cpu.yaml}" /app/config/user_config.yaml

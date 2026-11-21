@@ -4,6 +4,8 @@ on:
   pull_request:
 jobs:
   installation:
+    env:
+      FREEVIDEOAI_DOWNLOAD_SOURCE: official
     strategy:
       fail-fast: false
       matrix:
@@ -17,13 +19,13 @@ jobs:
       - name: Install test dependencies
         run: python -m pip install -e ".[dev,cloud,local]" uv
       - name: Test recommendation, configuration and Web API
-        run: python -m pytest tests/test_installation.py tests/test_hardware_and_cloud.py -q
+        run: python -m pytest tests/test_installation.py tests/test_installation_mirrors.py tests/test_config_concurrency.py tests/test_hardware_and_cloud.py -q
       - name: Bootstrap plan without GPU
         run: python scripts/install.py --profile cloud --json
       - name: Linux shell entry point
         if: runner.os == 'Linux'
         run: |
-          for script in install.sh scripts/build_docker.sh scripts/setup_cloud_gpu.sh docker/entrypoint.web.sh; do bash -n "$script"; done
+          for script in install.sh scripts/install_sources.sh scripts/install_system_deps.sh scripts/build_docker.sh scripts/setup_cloud_gpu.sh docker/entrypoint.web.sh; do bash -n "$script"; done
           bash install.sh --profile cloud --json
       - name: Linux clean environment smoke test
         if: runner.os == 'Linux'

@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import PROJECT_ROOT
+from .downloads import download_environment
 from .logger import get_logger
 
 logger = get_logger().bind(module="asr_utils")
@@ -80,6 +81,8 @@ def get_whisper_model(
     首次加载后缓存，同参数再次调用直接复用（省去每次 2-4s 的模型加载）。
     GPU 加载/warmup 失败自动降级 cpu+int8 并记录原因。
     """
+    # Hub reads its endpoint at import time, including the first lazy ASR download.
+    os.environ.update(download_environment())
     from faster_whisper import WhisperModel
 
     key = (model_size, device, compute_type, download_root or "")

@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from krvoiceai.app import FreeVideoAI
+from krvoiceai.pipeline.state import PIPELINE_STEPS
 from krvoiceai.ui.gradio_app import (
     STEP_NAMES,
     STEP_ORDER,
@@ -44,10 +45,10 @@ class TestProgressDisplay:
         assert "🔄" in result
 
     def test_all_step_names_present(self):
-        """所有 9 个步骤中文名都应展示"""
+        """所有内部处理步骤的中文名都应展示"""
         result = _format_progress({})
-        expected_names = ["文案提取", "文案仿写", "语音合成", "数字人生成",
-                          "字幕生成", "视频合成", "标题生成", "封面生成", "多平台发布"]
+        expected_names = ["文案提取", "文案优化", "原创检测", "语音合成", "数字人生成",
+                          "字幕生成", "画中画/插播", "视频合成", "标题生成", "封面生成", "多平台发布"]
         for name in expected_names:
             assert name in result, f"缺少步骤名: {name}"
 
@@ -241,7 +242,7 @@ class TestJobManagement:
         assert detail["job_id"] == job_id
         assert detail["status"] == "success"
         # 应包含步骤详情
-        assert len(detail["steps"]) == 9
+        assert {step["step"] for step in detail["steps"]} == set(PIPELINE_STEPS)
         # 每步应有 result 字段
         for step in detail["steps"]:
             assert "result" in step

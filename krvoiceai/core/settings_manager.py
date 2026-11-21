@@ -12,10 +12,8 @@
 from __future__ import annotations
 
 import os
-import re
 import threading
 from copy import deepcopy
-from pathlib import Path
 from typing import Any, Callable, Optional
 
 import httpx
@@ -39,152 +37,19 @@ SENSITIVE_PATHS = {
 
 # 各 provider 的预设配置（前端下拉选择时使用）
 PROVIDER_PRESETS = {
-    "llm": {
-        "agnes": {
-            "label": "Agnes AI（免费，agnes-2.0-flash）",
-            "base_url": "https://apihub.agnes-ai.com/v1",
-            "models": ["agnes-2.0-flash", "agnes-1.5-flash"],
-            "api_key_url": "https://platform.agnes-ai.com",
-        },
-        "deepseek": {
-            "label": "DeepSeek 深度求索",
-            "base_url": "https://api.deepseek.com/v1",
-            "models": ["deepseek-chat", "deepseek-reasoner", "deepseek-coder"],
-            "api_key_url": "https://platform.deepseek.com/api_keys",
-        },
-        "qwen": {
-            "label": "通义千问 (DashScope)",
-            "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-            "models": ["qwen-turbo", "qwen-plus", "qwen-max", "qwen-long"],
-            "api_key_url": "https://dashscope.console.aliyun.com/apiKey",
-        },
-        "openai": {
-            "label": "OpenAI",
-            "base_url": "https://api.openai.com/v1",
-            "models": ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"],
-            "api_key_url": "https://platform.openai.com/api-keys",
-        },
-        "moonshot": {
-            "label": "Moonshot Kimi",
-            "base_url": "https://api.moonshot.cn/v1",
-            "models": ["moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"],
-            "api_key_url": "https://platform.moonshot.cn/console/api-keys",
-        },
-        "zhipu": {
-            "label": "智谱 GLM",
-            "base_url": "https://open.bigmodel.cn/api/paas/v4",
-            "models": ["glm-4", "glm-4-air", "glm-4-flash", "glm-4v"],
-            "api_key_url": "https://open.bigmodel.cn/usercenter/apikeys",
-        },
-        "mock": {
-            "label": "Mock 模式（无需 API Key，模板化输出）",
-            "base_url": "",
-            "models": [],
-            "api_key_url": "",
-        },
-    },
-    "tts": {
-        "mimo": {
-            "label": "小米 MiMo TTS（mimo-v2.5-tts，免费）",
-            "needs_api_base": True,
-            "needs_api_key": True,
-            "default_api_base": "https://token-plan-cn.xiaomimimo.com/v1",
-            "models": ["mimo-v2.5-tts", "mimo-v2.5-tts-voicedesign", "mimo-v2.5-tts-voiceclone"],
-            "voices": ["mimo_default"],
-        },
-        "gpt_sovits": {
-            "label": "GPT-SoVITS 云端（声音克隆）",
-            "needs_api_base": True,
-            "needs_api_key": False,
-            "default_api_base": "http://localhost:9880",
-        },
-        "edge_tts": {
-            "label": "Edge TTS（微软标准音色，免费）",
-            "needs_api_base": False,
-            "needs_api_key": False,
-            "voices": [
-                "zh-CN-XiaoxiaoNeural", "zh-CN-YunxiNeural", "zh-CN-YunjianNeural",
-                "zh-CN-XiaoyiNeural", "zh-CN-YunyangNeural", "zh-CN-YunxiaNeural",
-            ],
-        },
-        "mock": {
-            "label": "Mock 模式（静音音频，仅测试用）",
-            "needs_api_base": False,
-            "needs_api_key": False,
-        },
-    },
-    "avatar": {
-        "musetalk_api": {
-            "label": "MuseTalk-API 远程（文件上传）",
-            "needs_api_base": True,
-            "needs_api_key": False,
-        },
-        "musetalk_local": {
-            "label": "MuseTalk 本地（GPU 近实时，失败自动降级 Wav2Lip）",
-            "needs_api_base": False,
-            "needs_api_key": False,
-        },
-        "omnihuman_api": {
-            "label": "OmniHuman 云端（可配置兼容中转站）",
-            "needs_api_base": False,
-            "needs_api_key": False,
-        },
-        "latentsync_local": {
-            "label": "LatentSync 1.6 本地（≥18GB 显存，beta，不够档自动降级 MuseTalk）",
-            "needs_api_base": False,
-            "needs_api_key": False,
-        },
-        "echomimic_local": {
-            "label": "EchoMimic V3 本地（≥12GB 显存，beta，不够档自动降级 MuseTalk）",
-            "needs_api_base": False,
-            "needs_api_key": False,
-        },
-        "wav2lip": {
-            "label": "Wav2Lip 本地（CPU 唇形同步，慢但稳）",
-            "needs_api_base": False,
-            "needs_api_key": False,
-        },
-        "musetalk": {
-            "label": "MuseTalk 云端（实时口播）",
-            "needs_api_base": True,
-            "default_api_base": "http://localhost:8010",
-        },
-        "latentsync": {
-            "label": "LatentSync 云端（高精度口型）",
-            "needs_api_base": True,
-            "default_api_base": "http://localhost:8011",
-        },
-        "echomimic": {
-            "label": "EchoMimic 云端（表情驱动）",
-            "needs_api_base": True,
-            "default_api_base": "http://localhost:8012",
-        },
-        "mock": {
-            "label": "Mock 模式（占位图视频，仅测试用）",
-            "needs_api_base": False,
-        },
-    },
-    "asr": {
-        "mimo": {
-            "label": "小米 MiMo ASR（mimo-v2.5-asr，免费）",
-            "models": ["mimo-v2.5-asr"],
-            "needs_api_base": True,
-            "needs_api_key": True,
-            "default_api_base": "https://token-plan-cn.xiaomimimo.com/v1",
-        },
-        "funasr": {
-            "label": "FunASR（本地，paraformer-zh）",
-            "models": ["paraformer-zh", "paraformer-zh-streaming", "conformer-zh"],
-        },
-        "whisper": {
-            "label": "OpenAI Whisper",
-            "models": ["tiny", "base", "small", "medium", "large", "large-v3"],
-        },
-        "mock": {
-            "label": "Mock 模式（按句切分，无真实识别）",
-            "models": [],
-        },
-    },
+    "llm": {"deepseek": {
+        "label": "DeepSeek Chat API", "base_url": "https://api.deepseek.com/v1",
+        "models": ["deepseek-chat"], "api_key_url": "https://platform.deepseek.com/api_keys",
+    }},
+    "tts": {"voxcpm": {
+        "label": "VoxCPM-0.5B 本地克隆", "needs_api_base": False, "needs_api_key": False,
+    }},
+    "avatar": {"musetalk_local": {
+        "label": "MuseTalk 1.5 本地", "needs_api_base": False, "needs_api_key": False,
+    }},
+    "asr": {"whisper_local": {
+        "label": "Whisper small 本地 CPU int8", "models": ["small"],
+    }},
 }
 
 # 字幕样式预设（对标剪映/简影，6 种风格）
@@ -694,8 +559,18 @@ class SettingsManager:
                 return {"success": True, "message": "edge-tts 可用"}
             except ImportError:
                 return {"success": False, "message": "edge-tts 未安装，请执行 pip install edge-tts"}
-        if provider in ("voxcpm", "moss_nano"):
-            return {"success": True, "message": f"{provider} 为本地引擎（子进程运行），无需连接测试；失败自动降级"}
+        if provider == "voxcpm":
+            from .config import resolve_path
+            from .pro_models import require_model
+            config = get_config()
+            try:
+                executable = resolve_path(config.get("tts.voxcpm.venv_python", ""))
+                if not executable.is_file():
+                    raise RuntimeError(f"VoxCPM 独立 Python 不存在: {executable}")
+                require_model("voxcpm", resolve_path(config.get("tts.voxcpm.model_dir", "")))
+                return {"success": True, "message": "VoxCPM 本地权重与 Python 已就绪；推理以短文案生成验证。"}
+            except RuntimeError as exc:
+                return {"success": False, "message": str(exc)}
         if not api_base:
             return {"success": False, "message": "服务地址未填写"}
 
@@ -761,8 +636,10 @@ class SettingsManager:
 
         if provider == "mock":
             return {"success": True, "message": "Mock 模式无需测试，始终可用"}
-        if provider in ("musetalk_local", "wav2lip", "latentsync_local", "echomimic_local"):
-            return {"success": True, "message": f"{provider} 为本地引擎，无需连接测试；不够档/未安装时自动降级 MuseTalk 链"}
+        if provider == "musetalk_local":
+            from ..modules.avatar_engine import AvatarEngine
+            ready, reason = AvatarEngine(config=get_config())._check_musetalk_env()
+            return {"success": ready, "message": "MuseTalk 本地环境检查通过" if ready else reason}
         if provider == "omnihuman_api":
             from ..modules.omnihuman_client import OmniHumanClient
             ready, reason = OmniHumanClient().available()

@@ -20,8 +20,9 @@ RUN git init /opt/MuseTalk && cd /opt/MuseTalk \
     && git checkout --detach FETCH_HEAD
 COPY scripts/install_musetalk.py /app/scripts/install_musetalk.py
 RUN /opt/musetalk-env/bin/python /app/scripts/install_musetalk.py --repo /opt/MuseTalk && /opt/musetalk-env/bin/pip check
-COPY docker/download_musetalk_models.py /app/docker/download_musetalk_models.py
-RUN /opt/musetalk-env/bin/python /app/docker/download_musetalk_models.py && /opt/musetalk-env/bin/python -c "import torch, cv2, transformers, mmpose, diffusers; from mmcv.ops import nms; print('MuseTalk dependencies loaded:', torch.__version__)"
+COPY scripts/download_pro_models.py /app/scripts/download_pro_models.py
+RUN python /app/scripts/download_pro_models.py --models musetalk --destination /opt/MuseTalk/models --no-config \
+    && /opt/musetalk-env/bin/python -c "import torch, cv2, transformers, mmpose, diffusers; from mmcv.ops import nms; print('MuseTalk dependencies loaded:', torch.__version__)"
 ENV NVIDIA_VISIBLE_DEVICES=all NVIDIA_DRIVER_CAPABILITIES=compute,utility
 ENV FREEVIDEOAI_DEFAULT_CONFIG=/opt/freevideoai/default-user.yaml
 

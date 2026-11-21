@@ -44,6 +44,7 @@ def start(profile: str, activate: bool = False) -> dict:
     if not native_available():
         raise RuntimeError("当前为容器部署或缺少 uv；请在宿主机使用安装脚本或构建对应镜像。")
     root = Path(__file__).resolve().parents[2]
+    profile = "pro" if profile == "auto" else profile
     plan = installation.make_plan(root, profile, query_gpus())
     installation.preflight(plan)
     with _lock:

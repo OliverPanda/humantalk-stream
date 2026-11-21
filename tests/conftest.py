@@ -5,8 +5,9 @@ import shutil
 from pathlib import Path
 
 import pytest
+import yaml
 
-from krvoiceai.core.config import Config, get_config
+from krvoiceai.core.config import Config, DEFAULT_CONFIG_PATH
 
 
 @pytest.fixture(scope="session")
@@ -21,8 +22,11 @@ def isolated_config(test_root: Path, monkeypatch) -> Config:
     work_root = test_root / "workspace_data"
     work_root.mkdir(parents=True, exist_ok=True)
 
-    # 加载默认配置后覆盖路径
-    cfg = Config.load()
+    # 测试不能读取开发者密钥、用户配置或启动真实模型/API。
+    cfg = Config(yaml.safe_load(DEFAULT_CONFIG_PATH.read_text(encoding="utf-8")))
+    for section in ("llm", "tts", "avatar", "asr"):
+        cfg.set(f"{section}.provider", "mock")
+    cfg.set("llm.api_key", "")
     cfg.set("project.work_root", str(work_root))
     cfg.set("project.temp_root", str(work_root / "tmp"))
     cfg.set("logging.file", str(work_root / "logs" / "test.log"))

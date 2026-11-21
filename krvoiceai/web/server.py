@@ -38,7 +38,7 @@ def _get_app() -> FreeVideoAI:
 # ============ 请求模型 ============
 
 class InstallationRequest(BaseModel):
-    profile: Literal["auto", "cloud", "voice", "standard", "pro"] = "auto"
+    profile: Literal["auto", "pro"] = "pro"
     activate: bool = False
 
 class GenerateRequest(BaseModel):
@@ -328,7 +328,7 @@ def create_app() -> FastAPI:
         from ..core.config import PROJECT_ROOT
         from ..core.hardware import query_gpus
         try:
-            plan = installation.make_plan(Path(PROJECT_ROOT), "auto", query_gpus())
+            plan = installation.make_plan(Path(PROJECT_ROOT), "pro", query_gpus())
         except ValueError as exc:
             return {"available": False, "reason": str(exc), **installation_jobs.status()}
         return {

@@ -16,7 +16,7 @@
     git clone https://github.com/bytedance/LatentSync.git && cd LatentSync && pip install -e .
     # 或 MuseTalk（备选）：
     pip install musetalk opencv-python
-    参考 scripts/setup_cloud_gpu.sh 一键安装
+    历史兼容服务入口；当前 Pro 直接使用本地 MuseTalk worker，无需启动此服务。
 """
 from __future__ import annotations
 

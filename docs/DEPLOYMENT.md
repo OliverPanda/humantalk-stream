@@ -1,281 +1,173 @@
-# FreeVideoAI Pro 部署指南
+# Pro 部署与排查
 
-本文只介绍 Pro 原生部署，优先使用 Linux x86_64 服务器。
-安装完成后，在 Web 配置 LLM、注册声音与形象即可开始生成。
-快速命令见 [README](../README.md)。
+固定链路：DeepSeek Chat API → 本地 VoxCPM-0.5B → 本地 MuseTalk 1.5 → 本地 Whisper small → FFmpeg。
+DeepSeek API 是唯一需要配置的模型服务；数字人无需启动 8010 端口的额外 API。
+不使用 LatentSync、EchoMimic、Wav2Lip、Edge TTS 或云端视频生成。
 
-## 1. 服务器要求与安装范围
+## 环境与安装
 
-- 第一张 NVIDIA 显卡总显存至少 18GB，`nvidia-smi` 正常；多卡显存不会合并。
-- Linux x86_64，以下命令适用于 Ubuntu 22.04 / 24.04、Debian 12。
-- 驱动需兼容 VoxCPM 的 PyTorch 2.5.1 cu121 和 MuseTalk 的 PyTorch 2.0.1 cu118。
-- 项目所在磁盘至少有 29GiB 可用空间；另为下载缓存、任务中间文件与输出视频预留空间。
-- 能访问下文列出的镜像站，以及 OpenMMLab 官方 wheel 地址；首次取得源码还需访问 GitHub 或自行同步源码。
-
-24GB 显存满足 Pro 的显存门槛，但不能代替磁盘空间。进入准备安装的项目目录后，
-用 `df -h .` 检查该目录所在挂载点；根盘空间不足时，先将源码放到容量足够的数据盘，
-再执行安装。虚拟环境和生成的模型路径与安装目录有关，安装后不要直接搬动运行目录。
-
-Pro 自动安装主程序、VoxCPM-0.5B、MuseTalk 1.5 及对应依赖和权重，
-配置 CPU Whisper 字幕识别、Linux 中文字体和模型路径。
-LatentSync / EchoMimic 仅提供选装指引，需要按模型卡另行安装。
-显存门槛按总显存检查，运行前还需确认没有其他进程大量占用显存。
-
-## 2. Linux 安装
-
-### 准备系统依赖与源码
+Linux x86_64，第一张 NVIDIA 显卡总显存至少 18GB，多卡显存不相加。
+驱动须兼容 PyTorch cu121 / cu118；建议 40GiB 以上可用磁盘。
+安装和首次取得源码、权重需要联网。视频生成期间仅文案与标题调用 DeepSeek API。
 
 ```bash
+cd /root/gpufree-data/freevideoai
 nvidia-smi
-sudo apt-get update
-sudo apt-get install -y git curl ca-certificates
-git clone https://github.com/OliverPanda/humantalk-stream.git freevideoai
-cd freevideoai
-# root 用户省略 sudo
+df -h .
 sudo bash scripts/install_system_deps.sh
-ffmpeg -version
-ffprobe -version
-```
-
-已有源码时进入项目根目录即可，使用包含当前安装脚本的版本。
-其他发行版安装对应系统包，并确认中文字体路径可用。
-安装入口会按需下载 uv 与 Python，并为主程序和两个模型创建独立环境，
-无需手动准备系统 Python 虚拟环境。
-
-系统依赖脚本通过临时 APT 源安装 Ubuntu／Debian 依赖，不改写系统源文件。
-包括 FFmpeg、中文字体和 Python/pip；已有环境也可重跑。
-
-### 默认镜像与自定义源
-
-默认读取 `config/install-mirrors.env`，无需在每次安装前手动 export。
-Linux、Windows、网页安装子进程、Docker 构建和首次 Whisper 下载共用这套配置。
-已有非空环境变量优先于文件中的默认值。
-镜像配置是简单的 `KEY=value` 数据文件，每行一个字段，不写 `export`、引号或 Shell 表达式。
-可以修改该文件中的公开源地址，或通过 `FREEVIDEOAI_MIRROR_CONFIG` 指向自己的同格式文件；
-它独立于 `.env`、`config/user_config.yaml`，不用于保存模型 API 密钥。
-
-| 下载内容 | 默认源／方式 | 自定义变量 |
-|---|---|---|
-| pip / uv Python 包 | 清华 PyPI 镜像 | `PIP_INDEX_URL` / `UV_INDEX_URL` |
-| uv 管理的 Python | 南京大学 python-build-standalone 镜像 | `UV_PYTHON_INSTALL_MIRROR` |
-| PyTorch CUDA wheel | 上海交大 pytorch-wheels，自动追加 `cu121` / `cu118` | `FREEVIDEOAI_TORCH_INDEX` |
-| VoxCPM、MuseTalk、Whisper、人脸附属权重 | HF 镜像，附属权重使用固定仓库版本 | `HF_ENDPOINT` |
-| MuseTalk Git 源码 | ghfast GitHub 代理，保留原仓库 origin 与固定提交 | `FREEVIDEOAI_GITHUB_MIRROR` |
-| Ubuntu / Debian 系统依赖 | 清华 APT 镜像，仅在系统依赖脚本／Docker 中使用 | `FREEVIDEOAI_APT_MIRROR` |
-| Chromium（Docker 构建） | npmmirror Playwright 二进制镜像 | `PLAYWRIGHT_DOWNLOAD_HOST` |
-| MMCV cu118 / torch2.0 wheel | 官方 OpenMMLab 地址，未找到可验证的公共替代源 | `FREEVIDEOAI_MMCV_INDEX` |
-
-`FREEVIDEOAI_TORCH_INDEX` 填 wheel 根地址，不追加 `cu121`／`cu118`；
-`UV_PYTHON_INSTALL_MIRROR` 填 Python release 镜像根目录；
-`FREEVIDEOAI_GITHUB_MIRROR` 是替换 `https://github.com` 的 URL 前缀；
-`FREEVIDEOAI_MMCV_INDEX` 则填写完整的 wheel 索引页面地址。
-保持 HTTPS 证书验证，不需要添加 `--trusted-host` 或关闭 SSL 验证。
-
-VoxCPM 和 MuseTalk 的 CUDA 版本、依赖版本不变，不会从普通 PyPI 镜像误装 CPU 版。
-人脸解析权重和 S3FD 也走 HF 下载，不再要求直连 Google Drive 或原检测模型站点。
-Linux 已有 Python/pip 时，uv 本身从 PyPI 镜像安装到用户目录；
-缺少 Python/pip 时仍使用官方 uv 安装脚本，因此建议先执行系统依赖脚本。
-
-镜像不可用时可在命令前指定自己的源，例如：
-
-```bash
-HF_ENDPOINT=https://你的模型镜像地址 \
-  bash install.sh --profile pro --install --activate
-```
-
-若要同时替换 Python 包源，应设置 pip 和 uv 两个变量：
-
-```bash
-PIP_INDEX_URL=https://你的包镜像地址/simple \
-UV_INDEX_URL=https://你的包镜像地址/simple \
-  bash install.sh --profile pro --install --activate
-```
-
-系统依赖脚本通过 sudo 执行时，sudo 可能过滤当前环境中的变量。
-需要指定 APT 镜像时，在 sudo 后显式传入：
-
-```bash
-sudo env FREEVIDEOAI_APT_MIRROR=https://你的APT镜像地址 \
-  bash scripts/install_system_deps.sh
-```
-
-或跳过项目的全部镜像默认值，使用官方源：
-
-```bash
-FREEVIDEOAI_DOWNLOAD_SOURCE=official bash install.sh --profile pro --install --activate
-```
-
-该开关不会清除你自己已导出的环境变量；若之前手动设过镜像变量，需在新终端执行，
-或先取消对应变量。它也不会改回系统既有的 APT／pip 全局配置。
-需要仅为本次命令取消常见的手动源设置时，可执行：
-
-```bash
-env -u HF_ENDPOINT -u PIP_INDEX_URL -u UV_INDEX_URL \
-  -u UV_PYTHON_INSTALL_MIRROR -u FREEVIDEOAI_TORCH_INDEX \
-  -u FREEVIDEOAI_GITHUB_MIRROR -u FREEVIDEOAI_MMCV_INDEX \
-  FREEVIDEOAI_DOWNLOAD_SOURCE=official \
-  bash install.sh --profile pro --install --activate
-```
-
-| 网络参数 | 默认值 |
-|---|---|
-| `HF_HUB_ETAG_TIMEOUT` | 元数据请求 60 秒 |
-| `HF_HUB_DOWNLOAD_TIMEOUT` | 文件下载 120 秒 |
-| `HF_HUB_DISABLE_XET` | `1`，默认禁用 Xet 下载通道 |
-| `PIP_TIMEOUT` / `PIP_RETRIES` | 120 秒 / 5 次 |
-| `UV_HTTP_TIMEOUT` / `UV_HTTP_RETRIES` | 120 秒 / 5 次 |
-
-这些是请求等待和重试参数，不限制整次安装的总时长。
-离线变量 `HF_HUB_OFFLINE=1` 会阻止下载，在线安装前应取消。
-
-### 安装 Pro 并应用配置
-
-```bash
-# 可选：只预览 Pro 计划；可能下载 uv 与 Python，不安装应用和模型
-bash install.sh --profile pro --json
-# 执行安装，并应用本地引擎及路径
 bash install.sh --profile pro --install --activate
 ```
 
-`--activate` 会覆盖推荐方案包含的现有字段，例如引擎、模型路径和字幕字体，
-旧配置保存到 `config/user_config.yaml.bak`。已有环境执行前先核对配置。
-不传 `--activate` 时保留已有字段，只补缺失字段，因此可能继续使用原来的引擎。
+root 账户可省略 `sudo`。安装器依次安装主程序、VoxCPM、MuseTalk、Whisper，
+先执行 `pip install modelscope==1.34.0`，全部权重通过该 SDK 下载。
+源码仍通过 Git 获取，Python 依赖仍通过 pip/uv 安装，这些不是模型权重。
 
-安装器检查依赖、CUDA 并实际加载模型；全部验证通过后才写推荐配置。
-失败时不会应用本次推荐配置，已下载文件保留，修复后重跑同一命令。
-首次耗时主要取决于依赖和权重下载，不要求手动逐项安装 Python 包。
+三个模型都加载验证通过后才写 `config/user_config.yaml`；Pro 会应用固定模型选型及路径，
+保留已有 DeepSeek Key 和用户素材目录。旧配置备份为 `config/user_config.yaml.bak`。
+失败后修复提示的问题，重跑同一命令；无需删除 runtime 或清空已下载文件。
 
-| 路径 | 内容 |
-|---|---|
-| `workspace_data/runtime/app` | 主程序，Python 3.11 |
-| `workspace_data/runtime/voxcpm` | VoxCPM 独立环境，Python 3.11 |
-| `workspace_data/runtime/musetalk` | MuseTalk 独立环境，Python 3.10 |
-| `workspace_data/runtime/models/VoxCPM-0.5B` | VoxCPM 权重 |
-| `workspace_data/runtime/MuseTalk` | MuseTalk 源码及 `models/` 权重 |
+## 模型与目录
 
-### 已有服务器继续安装
+全部路径以项目根目录为基准，配置支持相对路径。
 
-先将包含本次镜像配置的源码同步到服务器，再进入原安装目录。
-下载失败时不要删除 `workspace_data/runtime/`，重跑安装器会使用已有环境及下载缓存；
-它仍会重新检查依赖、执行下载检查和模型验证，不表示完全跳过前面步骤。
+| 模型组 | ModelScope 仓库 | 本地目录 |
+|---|---|---|
+| VoxCPM-0.5B | `OpenBMB/VoxCPM-0.5B` | `workspace_data/runtime/models/VoxCPM-0.5B` |
+| MuseTalk 1.5 | `AI-ModelScope/MuseTalk` | `workspace_data/runtime/MuseTalk/models/musetalkV15` |
+| SD VAE | `stabilityai/sd-vae-ft-mse` | `…/MuseTalk/models/sd-vae` |
+| MuseTalk 音频编码器 | `openai-mirror/whisper-tiny` | `…/MuseTalk/models/whisper` |
+| DWPose | `zhangjin/DWPose` | `…/MuseTalk/models/dwpose` |
+| 人脸解析、ResNet18 | `Kedreamix/Linly-Talker`（仅指定文件） | `…/MuseTalk/models/face-parse-bisent` |
+| S3FD 人脸检测 | `HaveAnApplePie/s3fd-619a316812` | `…/MuseTalk/models/face-detection`，同步到官方源码要求的位置 |
+| Whisper small 多语言 | `Systran/faster-whisper-small` | `workspace_data/runtime/models/faster-whisper-small` |
+
+完整下载约 6.13GiB；确切文件、大小与 SHA256 在 `krvoiceai/core/pro_models.json`。
+同名仓库的文件更新若与清单不一致，校验会失败，避免混用版本。
+MuseTalk 的 Whisper tiny 为 Transformers 格式；字幕模型为 CTranslate2 格式，不能互换。
+Pro 关闭额外 VAD 模型，只使用这份本地 Whisper small 完成识别与词级时间轴。
+
+补齐模型并自动配置（主程序环境已安装）：
 
 ```bash
-df -h .
-unset HF_HUB_OFFLINE
-unset TRANSFORMERS_OFFLINE
-set -o pipefail
-bash install.sh --profile pro --install --activate 2>&1 | tee install-pro.log
+workspace_data/runtime/app/bin/python scripts/download_pro_models.py
+# 也可以只补一组
+workspace_data/runtime/app/bin/python scripts/download_pro_models.py --models musetalk
 ```
 
-日志位于当前目录的 `install-pro.log`，每次执行上述命令会覆盖该日志。
-`set -o pipefail` 保证安装失败时不会被 `tee` 的成功状态掩盖。
-如果失败点是 VoxCPM 下载，检查最早的连接／超时／证书异常；
-最后的 `LocalEntryNotFoundError` 不能单独确定网络失败原因。
+下载器在所有选中模型下载并校验成功后，将实际目录及对应引擎写入
+`config/user_config.yaml`，保留 DeepSeek Key、兼容服务地址和素材目录；
+单独下载一组时只更新该阶段和 DeepSeek 选型。已有配置会备份，下载失败不改配置。
 
-## 3. 启动 Web
+自定义运行目录使用 `--runtime /实际/runtime`；自定义单组模型目录使用
+`--destination /实际/模型目录`，无需再手动修改模型路径。
+MuseTalk 目标目录必须为 `/实际/MuseTalk源码目录/models`。
+这些相对路径都以项目根目录为基准。自定义 runtime 时，对应的 VoxCPM/MuseTalk
+独立环境也应位于该 runtime 下；下载器只下载模型，缺少源码或依赖时仍需运行安装器。
+仅下载而不写配置可加 `--no-config`；完整安装器使用此模式，加载验证通过后才统一激活配置。
+下载器校验通过才替换目标文件，不删除用户已有模型或素材。
 
-安装成功后，在项目根目录执行：
+## 配置与启动
+
+安装器会写入实际路径。核心配置如下，合并到已有节点，不要重复创建同名 YAML 节点：
+
+```yaml
+llm:
+  provider: deepseek
+  base_url: https://api.deepseek.com/v1
+  model: deepseek-chat
+  api_key: "填写密钥，或使用网页保存"
+tts:
+  provider: voxcpm
+  fallback_chain: [voxcpm]
+avatar:
+  provider: musetalk_local
+  musetalk_local:
+    repo_dir: ./workspace_data/runtime/MuseTalk
+    env_python: ./workspace_data/runtime/musetalk/bin/python
+    worker_script: ./scripts/musetalk_worker.py
+    version: v15
+    batch_size: 4
+    use_float16: true
+    timeout: 1800
+asr:
+  provider: whisper_local
+  whisper:
+    model_size: small
+    model_dir: ./workspace_data/runtime/models/faster-whisper-small
+    device: cpu
+    compute_type: int8
+    vad_filter: false
+```
+
+环境变量（包括 `.env` 中的 `KRVOICEAI_*`）优先于 YAML；旧的 provider、模型路径变量会覆盖新配置，
+请移除冲突项后重启。安装器会在应用配置前检查冲突，并保留下载进度；不会删除或改写 `.env`。
 
 ```bash
 workspace_data/runtime/app/bin/python start.py --host 0.0.0.0 --port 8000
 ```
 
-确保服务器防火墙／云安全组允许客户端访问 8000 端口，
-浏览器打开 `http://服务器IP:8000`。
-仅在服务器本机访问时可省略 `--host`，默认监听 `127.0.0.1`。
-该命令在前台运行，停止后 Web 服务也会退出。
-应使用上面的安装器环境解释器，不要仅凭终端显示 `(app)` 就使用裸 `python`。
-`ModuleNotFoundError: No module named 'yaml'` 通常表示安装未完成或解释器选错；
-先处理安装失败，再启动。参数是 `--host`，不是 `00host`。
+保持终端运行，访问 `http://服务器IP:8000`。重启时先在旧终端按 `Ctrl+C`，再执行同一命令。
+启动终端会打印生效的引擎、MuseTalk 版本、模型绝对路径、独立 Python/worker、FFmpeg、
+缺失项及修复命令；DeepSeek Key 只显示是否设置。启动检查仅检查文件和大小，
+实际 CUDA/模型加载仍以上面的安装验证或下面的 `verify_musetalk.py --cuda` 为准。
+下载脚本更新配置后，需要重启正在运行的服务。
 
-## 4. Web 配置与首次生成
+## Pro 探针
 
-| 页面 | 操作 | 完成标准 |
-|---|---|---|
-| 模型配置 → LLM | 填写服务地址、API Key、模型，测试连接并保存 | LLM 连接测试通过 |
-| 模型配置 → TTS | 确认选择 VoxCPM | 使用安装器生成的本地环境与权重路径 |
-| 模型配置 → 数字人 | 确认选择 MuseTalk 本地 | 使用安装器生成的本地环境、仓库和 worker 路径 |
-| 我的声音 | 上传 5～20 秒干净人声并注册音色 | 创作时可选中该音色 |
-| 我的形象 | 上传正面照片或 10～30 秒说话视频并注册形象 | 创作时可选中该形象 |
-| 开始创作 | 选择声音与形象，输入 5～10 秒短文案并生成 | 配音可听、嘴型视频正常、中文字幕与封面显示正常 |
-
-**本地 VoxCPM 和 MuseTalk 无需填写远程 TTS／数字人 API 地址或密钥。**
-安装器已填写模型路径，一般无需手动修改。
-参考说话视频可以保留身体动作，建议优先于单张照片。
-
-基础口播只需配置实际使用的 LLM；AI 空镜、AI 生成形象属于可选功能，
-启用时再填写视频中转站配置。LLM 和这些云端功能需要联网。
-CPU Whisper small 权重会在首次字幕识别时下载，首次生成可能比后续慢。
-先串行完成一条短视频验证，再生成完整内容。
-
-## 5. 配置保存、备份与重启
-
-生效优先级：环境变量 > `config/user_config.yaml` > `config/default.yaml`。
-原生部署默认加载根目录 `.env`，可通过 `FREEVIDEOAI_ENV_FILE` 指定环境文件。
-优先在 Web 或用户配置文件修改设置，避免直接改内置默认值。
-网页保存仍不生效时，检查 `.env` 与进程环境中的同名变量，调整后重启服务。
-
-安装器写配置、网页保存、重置单段和重置全部共用
-`config/user_config.yaml.lock` 跨进程锁；读取、合并和保存／删除串行执行。
-保存采用同目录临时文件原子替换，写入失败时保留原配置。
-锁文件正常结束后可以保留，不要在操作期间删除；外部编辑器不参与此锁协议。
-
-保存前备份到 `config/user_config.yaml.bak`，只保留最近一次保存前的版本。
-“重置全部”删除用户配置，不会额外生成备份。
-恢复前先停止 Web 服务与安装任务，再执行：
+在部署的那台云电脑上执行：
 
 ```bash
-cp config/user_config.yaml.bak config/user_config.yaml
+workspace_data/runtime/app/bin/python scripts/probe_pro.py
+# 进一步验证 DeepSeek 请求和真人参考素材驱动出片
+workspace_data/runtime/app/bin/python scripts/probe_pro.py \
+  --check-api --face /实际/真人参考视频.mp4 --timeout 600
 ```
 
-重新运行上面的启动命令即可，模型环境和权重无需重装。
-完整数据备份还应包含 `.env`（或自定义环境文件）、`config/`、
-`workspace_data/` 和 `output/`；单个 YAML 备份不包含素材、任务与作品。
+探针读取生效配置（含 `.env` 覆盖），检查 Pro 选型、第一张显卡、模型大小及 SHA256、
+独立 Python 与源码；复用现有 worker 合成短音频，加载 MuseTalk 模型栈，
+运行 Whisper 推理，并实际生成一秒 H.264/AAC 视频后用 ffprobe 检查。
+本地模型子进程禁止网络连接，不会下载、修复模型或修改配置。
 
-原生 Web 的“模型配置 → 本机算力与模型库”也可安装推荐方案。
-满足 Pro 条件时会推荐 Pro；需切换已有配置时勾选“应用推荐引擎”，完成后重启服务。
-网页安装日志为 `workspace_data/runtime/install.log`，命令行安装直接输出日志。
-安装任务通过 `workspace_data/runtime/install.lock` 互斥。
+每次结果保存在 `workspace_data/probes/时间-随机后缀/`：
+`report.json` 标记每项 PASS / FAIL / SKIP，执行过的子进程保留 `.log`。
+失败返回退出码 1，并继续收集其他阶段问题；密钥不会写入终端或报告。
+可用 `--output /新的空目录` 指定保存位置，`--config /用户配置.yaml` 指定配置文件。
 
-## 6. Windows Pro（次选）
+默认只检查 DeepSeek Key 是否已设置，不调用 API；默认 MuseTalk 只验证 CUDA 和模型加载，
+不代表真人出片通过。`--check-api` 会发出一次短 Chat 请求；
+提供 `--face` 才会使用探针生成的配音验证真实数字人视频。
+缺少配音时 Whisper 使用一秒静音做运行检查，报告会注明未验证真实语音识别。
+探针通过也不代表长视频性能、声音相似度或口型质量已达标，仍需短任务人工确认。
 
-同样要求第一张 NVIDIA 显卡总显存至少 18GB、驱动正常。
-先安装可从 PATH 调用的 Python/pip、Git、FFmpeg 与 ffprobe，再进入项目根目录：
+## avatar 失败时
+
+先检查模型与 CUDA 是否能加载：
+
+```bash
+workspace_data/runtime/musetalk/bin/python scripts/verify_musetalk.py --repo workspace_data/runtime/MuseTalk --cuda
+```
+
+必须看到“依赖与权重加载验证通过”。网页的本地引擎检查也会实际检查环境，不再仅返回“无需连接测试”。
+选择已上传的真实形象，并确认任务有配音文件。失败原因会保存在任务详情和主日志；
+推理的完整 stdout/stderr 写入该任务的 `musetalk.log`，超时也保留日志。
+
+```bash
+tail -n 100 workspace_data/logs/krvoiceai.log
+# 用任务详情中的实际路径查看对应任务日志
+tail -n 100 workspace_data/jobs/你的任务ID/musetalk.log
+```
+
+优先处理日志中第一处 CUDA、依赖、缺失权重或参考素材错误。
+不要为 MuseTalk 故障额外安装其他数字人引擎。下载完成但文件无法加载时，重跑模型下载命令修复后再验证。
+
+## Windows
+
+安装 Git、可用的 NVIDIA 驱动、FFmpeg 和中文字体后，在项目根目录执行：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install.ps1 --profile pro --install --activate
-.\workspace_data\runtime\app\Scripts\python.exe start.py --host 0.0.0.0 --port 8000
+.\workspace_data\runtime\app\Scripts\python.exe start.py --host 127.0.0.1 --port 8000
 ```
 
-Windows 同样默认加载镜像配置。临时指定模型镜像时：
-
-```powershell
-$env:HF_ENDPOINT = 'https://你的模型镜像地址'
-powershell -ExecutionPolicy Bypass -File .\install.ps1 --profile pro --install --activate
-```
-
-切回项目的官方默认值时，先取消自己设置的镜像变量，再设置
-`$env:FREEVIDEOAI_DOWNLOAD_SOURCE = 'official'`；该开关不会主动清除已有环境变量。
-
-Web 配置和首次验证步骤相同；各环境解释器使用 `Scripts/python.exe`。
-MuseTalk 仍依赖上游 Windows wheel，缺失 wheel 或模型加载失败时安装会终止。
-GPU 服务器部署优先选择 Linux。
-恢复配置时使用 `Copy-Item config/user_config.yaml.bak config/user_config.yaml`。
-
-## 7. 故障排查
-
-| 现象 | 处理 |
-|---|---|
-| Pro 显存检查失败 | 确认第一张卡至少 18GB；多卡显存不相加，检查 `nvidia-smi` |
-| 提示至少需要 29GB 磁盘 | 用 `df -h .` 检查项目所在挂载点；显卡的 24GB 是显存，不是硬盘空间 |
-| 缺少 FFmpeg／中文字体 | 安装系统依赖，确认 `ffmpeg`、`ffprobe` 和中文字体文件存在 |
-| CUDA 验证失败 | 检查驱动与两个模型的 PyTorch CUDA 环境兼容性 |
-| 下载失败／Windows wheel 缺失 | 查看最早的网络异常；检查镜像、代理及离线变量，必要时自定义源或切回官方源；wheel 缺失需检查平台兼容性 |
-| `LocalEntryNotFoundError` | 查看此异常之前的原始错误，确认不是离线模式；按“已有服务器继续安装”保存日志并重跑 |
-| `No module named 'yaml'` | 完成整次安装，并使用 `workspace_data/runtime/app/bin/python` 启动 |
-| 安装后仍使用旧引擎 | 核对配置后使用 `--activate`，或在 Web 选择 VoxCPM 和 MuseTalk 本地并保存 |
-| Web 访问不到 | 检查启动进程、`--host 0.0.0.0`、端口、防火墙与安全组 |
-| 配置保存后未生效 | 检查 `.env` 和进程环境覆盖，调整后重启 |
-| 首次字幕识别等待较久 | 确认 Whisper 权重下载网络正常 |
-| 生成时显存不足 | 停止其他占用显存的任务，先串行生成短视频 |
-| 提示已有安装任务 | 等待当前任务结束，查看日志；不要删除锁文件绕过互斥 |
+Windows 的独立环境 Python 使用 `Scripts/python.exe`，Linux 使用 `bin/python`。
+Linux 云电脑是当前主要验证目标；真实 GPU 推理需在目标机器运行上面的加载检查和短任务验证。

@@ -100,6 +100,7 @@ def test_banned_words_loaded(checker):
 
 def test_banned_words_scan_hit(checker, job_work_dir):
     """命中违禁词 → 失败"""
+    checker.auto_fix_banned = False  # 本例验证扫描拦截，不让假 LLM 返回值参与自动改写。
     ctx = JobContext(
         work_dir=job_work_dir,
         script_text="我们的产品是全国第一品牌，绝对包赚不赔！",

@@ -19,13 +19,12 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from .config import PROJECT_ROOT
-from .downloads import download_environment
+from .config import PROJECT_ROOT, resolve_path
 from .logger import get_logger
 
 logger = get_logger().bind(module="asr_utils")
 
-# (model_size, device, compute_type, download_root) -> WhisperModel
+# (本地模型目录, device, compute_type) -> WhisperModel
 _MODEL_CACHE: dict[tuple, Any] = {}
 _CACHE_LOCK = threading.RLock()
 _DLL_DIRS_INJECTED: set[str] = set()
@@ -81,11 +80,17 @@ def get_whisper_model(
     首次加载后缓存，同参数再次调用直接复用（省去每次 2-4s 的模型加载）。
     GPU 加载/warmup 失败自动降级 cpu+int8 并记录原因。
     """
-    # Hub reads its endpoint at import time, including the first lazy ASR download.
-    os.environ.update(download_environment())
+    from .pro_models import require_model
+
+    # small 是配置标签，实际始终读取本地 CTranslate2 目录。
+    local_dir = resolve_path(
+        "./workspace_data/runtime/models/faster-whisper-small"
+        if model_size == "small" else model_size
+    )
+    require_model("whisper", local_dir)
     from faster_whisper import WhisperModel
 
-    key = (model_size, device, compute_type, download_root or "")
+    key = (str(local_dir), device, compute_type)
     with _CACHE_LOCK:
         model = _MODEL_CACHE.get(key)
         if model is not None:
@@ -94,10 +99,10 @@ def get_whisper_model(
             _inject_cuda_dll_dirs(cuda_dll_dirs)
         try:
             model = WhisperModel(
-                model_size,
+                str(local_dir),
                 device=device,
                 compute_type=compute_type,
-                download_root=download_root,
+                local_files_only=True,
             )
             _warmup(model, device)
         except Exception as e:
@@ -120,7 +125,7 @@ def get_whisper_model_from_cfg(whisper_cfg: dict | None):
     """从 asr.whisper 配置块构造/复用 WhisperModel 单例"""
     cfg = whisper_cfg or {}
     return get_whisper_model(
-        model_size=cfg.get("model_size", "small"),
+        model_size=cfg.get("model_dir") or cfg.get("model_size", "small"),
         device=cfg.get("device", "cpu"),
         compute_type=cfg.get("compute_type", "int8"),
         download_root=cfg.get("download_root") or None,
@@ -149,7 +154,7 @@ def transcribe_ref_text(
         str(audio_path),
         language=language,
         beam_size=int(cfg.get("beam_size", 5)),
-        vad_filter=bool(cfg.get("vad_filter", True)),
+        vad_filter=bool(cfg.get("vad_filter", False)),
     )
     text = "".join((seg.text or "").strip() for seg in segments)
     return text.strip()

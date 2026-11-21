@@ -8,7 +8,7 @@
 - edge_tts:   使用 edge-tts 标准音色（无克隆，CPU 可跑）
 - mock:       生成静音 wav（保证流程可跑通）
 
-降级链：合成失败时按 tts.fallback_chain（默认 voxcpm→moss_nano→edge_tts）逐级降级。
+Pro 固定使用 VoxCPM，失败直接报告错误。
 结果缓存：hash(文本+音色+关键参数) → workspace_data/cache/tts/<hash>.wav，命中直接复用。
 
 输出：wav/mp3 音频文件 + 时长 + 分句时间戳

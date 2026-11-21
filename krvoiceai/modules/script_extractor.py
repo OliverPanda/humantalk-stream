@@ -17,8 +17,6 @@ from __future__ import annotations
 import base64
 import re
 import shutil
-import subprocess
-import time
 from pathlib import Path
 from typing import Optional
 
@@ -119,7 +117,8 @@ class ScriptExtractor(BaseModule):
 
         try:
             # yt-dlp 可用且 ASR provider 支持（mimo/funasr）时走真实提取
-            use_real = self._ytdlp_available and self.asr_provider in ("funasr", "mimo")
+            use_real = self._ytdlp_available and self.asr_provider in (
+                "funasr", "mimo", "whisper_local")
             if use_real:
                 text = self._extract_real(url, ctx.work_dir)
             else:
@@ -210,8 +209,8 @@ class ScriptExtractor(BaseModule):
                                 except Exception as e2:
                                     self.logger.warning(f"文章提取也失败: {e2}")
                                     raise RuntimeError(
-                                        f"无法提取文案（网页抓取与视频下载均失败）。"
-                                        f"请直接在第①步手动输入文案，或粘贴抖音分享文本。"
+                                        "无法提取文案（网页抓取与视频下载均失败）。"
+                                        "请直接在第①步手动输入文案，或粘贴抖音分享文本。"
                                     )
             else:
                 # yt-dlp 或 ASR 不可用：优先用 Playwright 提取的 web_desc，再降级到分享文本/mock
@@ -233,6 +232,8 @@ class ScriptExtractor(BaseModule):
                 text = self._extract_article(video_url)
             except Exception as e:
                 self.logger.warning(f"文章提取失败，降级到 mock: {e}")
+                if self.asr_provider != "mock":
+                    raise
                 text = self._extract_mock(video_url)
         return self._clean_text(text)
 
@@ -289,34 +290,25 @@ class ScriptExtractor(BaseModule):
 
         用于本地文件文案提取；whisper_local provider 不可用时降级 mock。
         """
-        try:
-            from faster_whisper import WhisperModel
-        except ImportError:
-            self.logger.warning("faster-whisper 未安装，文案提取降级 mock")
-            return self._extract_mock(str(audio_path))
+        from ..core.asr_utils import get_whisper_model_from_cfg
 
         whisper_cfg = self.config.get("asr.whisper", {}) or {}
         model_size = whisper_cfg.get("model_size", "small")
-        device = whisper_cfg.get("device", "cpu")
-        compute_type = whisper_cfg.get("compute_type", "int8")
         beam_size = whisper_cfg.get("beam_size", 5)
         # 热词：提示 whisper 关注特定词汇，减少专有名词/术语识别错误
         hotwords = whisper_cfg.get("hotwords", "")
-        download_root = whisper_cfg.get("download_root", "") or None
 
         self.logger.info(
             f"faster-whisper 本地转写: {audio_path.name} model={model_size} beam={beam_size}"
         )
-        model = WhisperModel(
-            model_size, device=device, compute_type=compute_type,
-            download_root=download_root,
-        )
+        model = get_whisper_model_from_cfg(whisper_cfg)
         # initial_prompt 引导 whisper 输出简体中文 + 标点 + 热词（默认 small 模型倾向繁体）
         prompt = "以下是普通话的句子，使用简体中文和正确的标点符号。"
         if hotwords:
             prompt += f" 关键词：{hotwords}"
         segments, _ = model.transcribe(
-            str(audio_path), language="zh", vad_filter=True,
+            str(audio_path), language="zh",
+            vad_filter=bool(whisper_cfg.get("vad_filter", False)),
             beam_size=beam_size,
             initial_prompt=prompt,
             condition_on_previous_text=False,  # 避免幻觉扩散
@@ -715,7 +707,7 @@ class ScriptExtractor(BaseModule):
                         self.logger.info(f"Playwright 提取: desc={len(desc)}字, video_url={'有' if video_dl_url else '无'}")
                         return desc, video_dl_url
                     elif video_dl_url:
-                        self.logger.info(f"Playwright 仅提取到视频 URL（无文案），将做 ASR 转写")
+                        self.logger.info("Playwright 仅提取到视频 URL（无文案），将做 ASR 转写")
                         return "", video_dl_url
                     self.logger.warning(f"Playwright 渲染完成但未提取到内容: title={len(title)}字, meta={len(meta_desc)}字, caps={len(captured_video_urls)}")
                 finally:
@@ -733,7 +725,6 @@ class ScriptExtractor(BaseModule):
 
         用 httpx 下载视频（无需 yt-dlp），FFmpeg 提取音频，ASR 转写。
         """
-        import tempfile
         video_path = work_dir / "ref_video.mp4"
         audio_path = work_dir / "audio.wav"
 
@@ -1136,6 +1127,8 @@ class ScriptExtractor(BaseModule):
 
         根据平台特征生成不同主题的模拟文案。
         """
+        if self.asr_provider != "mock":
+            raise RuntimeError("参考文案提取失败，请检查视频下载与本地 Whisper 模型；也可直接输入文案。")
         self.logger.info(f"Mock 文案提取: {url}")
         # 根据域名推断平台
         if "douyin" in url or "iesdouyin" in url:

@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 from ..app import FreeVideoAI
-from ..core.logger import get_logger
+from ..core.startup import print_startup_summary
 
 
 def main():
@@ -78,7 +78,8 @@ def main():
         return 1
 
     app = FreeVideoAI()
-    logger = get_logger()
+    if args.command in ("web", "serve"):
+        print_startup_summary(app.config)
 
     if args.command == "run":
         script = args.script

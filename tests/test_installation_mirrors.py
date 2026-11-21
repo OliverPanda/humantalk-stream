@@ -157,45 +157,40 @@ def test_shared_musetalk_recipe_uses_mirrors(mirror_config, tmp_path, monkeypatc
                for _, kwargs in calls)
 
 
-def test_first_whisper_download_inherits_model_mirror(mirror_config, monkeypatch):
+def test_whisper_does_not_download_from_model_mirror(mirror_config, monkeypatch):
     from krvoiceai.core import asr_utils
     observed = []
+    monkeypatch.setattr("krvoiceai.core.pro_models.require_model", lambda *a: None)
 
-    def whisper(*args, **kwargs):
-        observed.append(os.environ.get("HF_ENDPOINT"))
+    def whisper(model, **kwargs):
+        observed.append(kwargs["local_files_only"])
         return object()
 
     monkeypatch.setitem(sys.modules, "faster_whisper", SimpleNamespace(WhisperModel=whisper))
     monkeypatch.setattr(asr_utils, "_MODEL_CACHE", {})
     asr_utils.get_whisper_model(device="cpu")
-    assert observed == ["https://models.example"]
+    assert observed == [True]
 
 
-def test_weights_use_hub_for_face_assets_and_keep_expected_layout(
-        mirror_config, tmp_path, monkeypatch):
-    calls = []
+def test_single_download_entry_keeps_musetalk_s3fd_layout(tmp_path, monkeypatch):
+    import hashlib
+    from krvoiceai.core import pro_models
+    content = b"model"
+    monkeypatch.setattr(pro_models, "MANIFEST", {"musetalk": [{
+        "repo": "owner/s3fd", "source": "s3fd.pth", "revision": "master",
+        "path": "face-detection/s3fd.pth", "size": len(content),
+        "sha256": hashlib.sha256(content).hexdigest(),
+    }]})
 
-    def snapshot_download(repo_id, *, local_dir, allow_patterns, **kwargs):
-        calls.append((repo_id, kwargs))
-        destination = Path(local_dir)
-        for name in allow_patterns:
-            path = destination / name
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(b"x" * (1024 * 1024 + 1))
-
-    def hf_hub_download(repo_id, filename, **kwargs):
-        calls.append((repo_id, kwargs))
-        path = tmp_path / "cached-s3fd.pth"
-        path.write_bytes(b"x" * (1024 * 1024 + 1))
+    def download(repo, source, *, local_dir, revision):
+        path = Path(local_dir) / source
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
         return str(path)
 
-    monkeypatch.setitem(sys.modules, "huggingface_hub", SimpleNamespace(
-        snapshot_download=snapshot_download, hf_hub_download=hf_hub_download))
-    monkeypatch.setattr(sys, "argv", [
-        "download_musetalk_models.py", "--root", str(tmp_path / "models")])
-    # Mirror settings must be passed to the Hub before it is imported.
-    runpy.run_path("docker/download_musetalk_models.py", run_name="__main__")
-    assert all(options["endpoint"] == "https://models.example" for _, options in calls)
-    assert any(repo == "camenduru/MuseTalk" for repo, _ in calls)
-    assert (tmp_path / "models/face-detection/s3fd.pth").stat().st_size > 1024 * 1024
-    assert (tmp_path / "musetalk/utils/face_detection/detection/sfd/s3fd.pth").exists()
+    monkeypatch.setitem(sys.modules, "modelscope.hub.file_download", SimpleNamespace(
+        model_file_download=download))
+    dest = tmp_path / "MuseTalk/models"
+    pro_models.download_model("musetalk", dest)
+    assert (dest / "face-detection/s3fd.pth").read_bytes() == content
+    assert (tmp_path / "MuseTalk/musetalk/utils/face_detection/detection/sfd/s3fd.pth").read_bytes() == content

@@ -6,11 +6,16 @@ from pathlib import Path
 
 
 def main():
+    os.environ["HF_HUB_OFFLINE"] = "1"
+    os.environ["TRANSFORMERS_OFFLINE"] = "1"
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", type=Path, required=True)
     parser.add_argument("--cuda", action="store_true")
     args = parser.parse_args()
     repo = args.repo.resolve()
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from krvoiceai.core.pro_models import require_musetalk_assets
+    require_musetalk_assets(repo)
     os.chdir(repo)
     sys.path.insert(0, str(repo))
     import torch
@@ -19,11 +24,11 @@ def main():
             raise RuntimeError("CUDA 不可用，请检查 NVIDIA 驱动和容器 GPU 透传。")
         # Test kernels before importing modules that load heavy model weights.
         torch.zeros(1, device="cuda").add_(1)
-    from mmcv.ops import nms
+    from mmcv.ops import nms  # noqa: F401 -- 导入会验证编译扩展
     from musetalk.utils.utils import load_all_model
     from musetalk.utils.audio_processor import AudioProcessor
     from musetalk.utils.face_parsing import FaceParsing
-    from musetalk.utils.preprocessing import get_landmark_and_bbox
+    from musetalk.utils.preprocessing import get_landmark_and_bbox  # noqa: F401
     from transformers import WhisperModel
     # These constructors load weights; import-only checks miss incomplete installations.
     load_all_model(

@@ -2,7 +2,7 @@
 
 provider：
 - musetalk_local: 本地 MuseTalk 1.5（GPU，近实时口型同步，默认；独立环境 musetalk_env）
-                  失败自动降级 wav2lip（fallback 链 musetalk_local→wav2lip）
+                  Pro 失败直接报告原始原因，不切换其他引擎
 - wav2lip:     本地 Wav2Lip 唇形同步（CPU 可跑，输入真人照片/视频+音频→嘴唇会动）
 - musetalk:    调用云端 MuseTalk API（口型同步）
 - latentsync:  调用云端 LatentSync API（备选）
@@ -16,10 +16,8 @@ import base64
 import os
 import shutil
 import subprocess
-import sys
 import time
 from pathlib import Path
-from typing import Any
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -66,12 +64,12 @@ class AvatarEngine(BaseModule):
 
     def setup(self) -> None:
         if self.provider == "musetalk_local":
-            # 本地 MuseTalk（GPU 独立环境）：未就绪时警告，运行时自动降级 Wav2Lip
+            # 本地 MuseTalk（GPU 独立环境）：未就绪时警告，运行时直接报错
             ready, reason = self._check_musetalk_env()
             if not ready:
                 self.logger.warning(
                     f"MuseTalk 本地环境未就绪: {reason}。"
-                    f"运行时将自动降级 Wav2Lip（fallback 链 musetalk_local→wav2lip）。"
+                    f"生成任务会直接报告此错误，请重新运行 Pro 安装器。"
                 )
             else:
                 self.logger.info(
@@ -88,7 +86,7 @@ class AvatarEngine(BaseModule):
                 # 环境未就绪：保持 provider=wav2lip，run() 时会给出明确报错
                 self.logger.warning(
                     f"Wav2Lip 环境未就绪: {reason}。"
-                    f"请运行 scripts/setup_wav2lip_env.bat 安装，"
+                    f"当前 Pro 固定使用 MuseTalk，请切换为 musetalk_local，"
                     f"或将 avatar.provider 改为 mock 跳过真实唇形同步。"
                 )
             else:
@@ -132,7 +130,7 @@ class AvatarEngine(BaseModule):
         if not env_python.exists():
             return False, (
                 f"独立 Python 环境不存在: {env_python}。"
-                f"请运行 scripts/setup_wav2lip_env.bat 创建 wav2lip_env。"
+                f"当前 Pro 固定使用 MuseTalk，请运行 Pro 安装器。"
             )
 
         # 2. 推理脚本存在
@@ -170,7 +168,7 @@ class AvatarEngine(BaseModule):
         """检查 MuseTalk 本地独立运行环境是否就绪
 
         风格与 _check_wav2lip_env 一致：返回 (ready, reason)。
-        ready=False 时 reason 给出具体缺失项和指引（不静默降级，由 run() 显式 fallback）。
+        ready=False 时 reason 给出具体缺失项和指引（由 run() 直接报告原始原因）。
         成功结果缓存（避免每次 job 重复付出独立环境 torch import 的 10-30s）。
         """
         if self._musetalk_env_ok:
@@ -183,7 +181,7 @@ class AvatarEngine(BaseModule):
         if not env_python.exists():
             return False, (
                 f"独立 Python 环境不存在: {env_python}。"
-                f"请参考 _upgrade/A2_数字人报告.md 创建 musetalk_env。"
+                f"请执行 bash install.sh --profile pro --install。"
             )
 
         # 2. Worker 脚本存在
@@ -196,18 +194,13 @@ class AvatarEngine(BaseModule):
         repo = _abs(self.musetalk_config.get("repo_dir", "../MuseTalk"))
         if not (repo / "scripts" / "inference.py").exists():
             return False, f"MuseTalk 仓库不存在或不完整: {repo}"
-        required_weights = [
-            repo / "models" / "musetalkV15" / "unet.pth",
-            repo / "models" / "sd-vae" / "diffusion_pytorch_model.bin",
-            repo / "models" / "whisper" / "pytorch_model.bin",
-            repo / "models" / "dwpose" / "dw-ll_ucoco_384.pth",
-            repo / "models" / "face-parse-bisent" / "79999_iter.pth",
-        ]
-        missing = [str(p) for p in required_weights if not p.exists()]
-        if missing:
-            return False, f"MuseTalk 模型权重缺失: {missing[0]} 等 {len(missing)} 个"
+        from ..core.pro_models import require_musetalk_assets
+        try:
+            require_musetalk_assets(repo)
+        except RuntimeError as exc:
+            return False, str(exc)
 
-        # 4. 依赖与 CUDA 能在独立环境使用（GPU 不可用则宁可降级 Wav2Lip）
+        # 4. 依赖与 CUDA 必须在独立环境使用。
         try:
             result = subprocess.run(
                 [str(env_python), "-c",
@@ -244,34 +237,11 @@ class AvatarEngine(BaseModule):
         try:
             start = time.time()
             if self.provider == "musetalk_local":
-                # fallback 链：musetalk_local → wav2lip（失败降级，日志写明原因）
-                video_path = None
                 ready, reason = self._check_musetalk_env()
-                if ready:
-                    try:
-                        video_path = self._generate_musetalk_local(
-                            ctx, avatar_id, output_path)
-                        ctx.metadata["avatar_backend"] = "musetalk_local"
-                    except Exception as e:
-                        self.logger.warning(
-                            f"MuseTalk 本地推理失败，降级 Wav2Lip: {e}")
-                else:
-                    self.logger.warning(
-                        f"MuseTalk 环境未就绪，降级 Wav2Lip: {reason}")
-                if video_path is None:
-                    w_ready, w_reason = self._check_wav2lip_env()
-                    if not w_ready:
-                        return ModuleResult(
-                            success=False,
-                            error=(
-                                f"musetalk_local 失败且 Wav2Lip fallback "
-                                f"未就绪: {w_reason}"
-                            ),
-                        )
-                    self.logger.info("使用 Wav2Lip fallback 生成数字人")
-                    video_path = self._generate_wav2lip(
-                        ctx, avatar_id, output_path)
-                    ctx.metadata["avatar_backend"] = "wav2lip_fallback"
+                if not ready:
+                    raise RuntimeError(f"MuseTalk 本地环境未就绪: {reason}")
+                video_path = self._generate_musetalk_local(ctx, avatar_id, output_path)
+                ctx.metadata["avatar_backend"] = "musetalk_local"
             elif self.provider == "wav2lip":
                 # 真实 Wav2Lip：环境未就绪必须报错（不静默降级）
                 ready, reason = self._check_wav2lip_env()
@@ -304,7 +274,7 @@ class AvatarEngine(BaseModule):
             elif self.provider in ("latentsync_local", "echomimic_local"):
                 # 4090 级本地档：先过显存护栏（不够档立即拒绝，绝不试跑），
                 # 被拦截时降级 musetalk_local 链并在日志/metadata 写明原因。
-                video_path = self._generate_pro_local(ctx, avatar_id, output_path)
+                raise RuntimeError("Pro 已固定使用 MuseTalk，请运行 Pro 安装器应用本地配置。")
             elif self.provider == "mock":
                 video_path = self._generate_mock(ctx, avatar_id, output_path)
             else:
@@ -424,18 +394,23 @@ class AvatarEngine(BaseModule):
             f"运行 MuseTalk 推理 (GPU, env={env_python.parent.parent.name})，"
             f"音频 {ctx.audio_duration:.1f}s，近实时（含模型加载约 1-3 分钟）..."
         )
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            cwd=str(repo),
-        )
-
+        log_path = ctx.work_dir / "musetalk.log"
+        env = dict(os.environ, HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1",
+                   PYTHONIOENCODING="utf-8", PYTHONUNBUFFERED="1")
+        try:
+            with log_path.open("w", encoding="utf-8") as log:
+                result = subprocess.run(
+                    cmd, stdout=log, stderr=subprocess.STDOUT,
+                    timeout=timeout, cwd=str(repo), env=env,
+                )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(
+                f"MuseTalk 推理超时（{timeout}s），完整日志: {log_path}"
+            ) from exc
         if result.returncode != 0:
-            tail = (result.stderr or result.stdout or "")[-500:]
+            tail = log_path.read_text(encoding="utf-8", errors="replace")[-2500:]
             self.logger.error(f"MuseTalk 推理失败(code={result.returncode}): {tail}")
-            raise RuntimeError(f"MuseTalk 推理失败: {tail[-300:]}")
+            raise RuntimeError(f"MuseTalk 推理失败，日志: {log_path}\n{tail}")
 
         if not output_path.exists():
             raise RuntimeError("MuseTalk 推理完成但输出文件不存在")
@@ -551,108 +526,6 @@ class AvatarEngine(BaseModule):
         model_file.unlink(missing_ok=True)
         ctx.metadata.pop("omnihuman_task_id", None)
         return result
-
-    def _generate_pro_local(
-        self, ctx: JobContext, avatar_id: str, output_path: Path
-    ) -> Path:
-        """4090 级本地档（latentsync_local / echomimic_local）
-
-        铁律：先过显存护栏——不够档立即拒绝并降级 MuseTalk 链，绝不在小卡上
-        尝试加载大模型（防 OOM 拖垮整条流水线，也是"功能可以有但别真跑"的落点）。
-        环境未安装同样降级（安装指引见模型管理页）。
-        ⚠️ worker 为 beta：尚未在 ≥16GB 真机联调，首跑失败会自动降级并记录原因。
-        """
-        from ..core import hardware as hw
-
-        pretty = ("LatentSync 1.6" if self.provider == "latentsync_local"
-                  else "EchoMimic V3")
-        cfg = self.config.get(f"avatar.{self.provider}", {}) or {}
-        min_vram = float(cfg.get("min_vram_gb",
-                                 18 if self.provider == "latentsync_local" else 12))
-
-        def _degrade(reason: str) -> Path:
-            self.logger.warning(f"{pretty} 不可用: {reason} → 降级 MuseTalk")
-            ctx.metadata["avatar_degraded_from"] = self.provider
-            ctx.metadata["avatar_degrade_reason"] = reason
-            ready, m_reason = self._check_musetalk_env()
-            if not ready:
-                raise RuntimeError(
-                    f"{pretty} 不可用（{reason}）且 MuseTalk 未就绪（{m_reason}）"
-                )
-            path = self._generate_musetalk_local(ctx, avatar_id, output_path)
-            ctx.metadata["avatar_backend"] = "musetalk_local_fallback"
-            return path
-
-        # 1. 显存护栏（硬拦截，绝不试跑）
-        try:
-            hw.ensure_vram(min_vram, pretty)
-        except hw.VramGateError as e:
-            return _degrade(str(e))
-
-        # 2. 环境就绪检查（repo/venv/worker 存在即可，深检查交给 worker 自身）
-        from ..core.config import resolve_path
-
-        # 空配置必须先拦：resolve_path("") 会解析成项目根目录（存在），
-        # 否则 exists() 护栏误过、subprocess 试图"执行一个目录"抛费解的 OSError
-        for key in ("env_python", "worker_script", "repo_dir"):
-            if not str(cfg.get(key, "")).strip():
-                return _degrade(f"配置缺失 avatar.{self.provider}.{key}")
-
-        env_python = resolve_path(cfg.get("env_python"))
-        worker = resolve_path(cfg.get("worker_script"))
-        repo = resolve_path(cfg.get("repo_dir"))
-        if not env_python.exists() or not repo.exists():
-            return _degrade(
-                f"未安装（repo={repo.name} 或其 venv 缺失，安装指引见模型管理页）"
-            )
-        if not worker.exists():
-            return _degrade(f"worker 脚本缺失: {worker}")
-
-        face_path = self._get_avatar_reference(avatar_id)
-        if not face_path:
-            raise RuntimeError(
-                f"数字人 {avatar_id} 无参考照片/视频，请先注册形象"
-            )
-        if (self.provider == "latentsync_local"
-                and Path(face_path).suffix.lower() not in
-                (".mp4", ".mov", ".avi", ".mkv", ".webm")):
-            return _degrade("LatentSync 需要出镜视频参考（当前形象只有照片）")
-
-        audio_path = ctx.audio_path
-        if audio_path.suffix.lower() != ".wav":
-            wav_path = ctx.work_dir / f"{self.provider}_input.wav"
-            self.ffmpeg.convert_audio(audio_path, wav_path)
-            audio_path = wav_path
-
-        cmd = [
-            str(env_python), str(worker),
-            "--repo", str(repo),
-            "--face", str(Path(face_path).resolve()),
-            "--audio", str(Path(audio_path).resolve()),
-            "--outfile", str(Path(output_path).resolve()),
-        ]
-        if self.provider == "latentsync_local":
-            cmd += ["--inference_steps", str(cfg.get("inference_steps", 25))]
-        else:
-            cmd += ["--sample_steps", str(cfg.get("sample_steps", 5))]
-
-        timeout = int(cfg.get("timeout", 3600))
-        self.logger.info(f"运行 {pretty} 推理（beta，GPU 独立环境）...")
-        try:
-            result = subprocess.run(
-                cmd, capture_output=True, text=True,
-                timeout=timeout, cwd=str(repo),
-            )
-        except subprocess.TimeoutExpired:
-            return _degrade(f"推理超时（>{timeout}s）")
-        if result.returncode != 0:
-            tail = (result.stderr or result.stdout or "")[-500:]
-            return _degrade(f"推理失败(code={result.returncode}): {tail[-300:]}")
-        if not output_path.exists():
-            return _degrade("推理完成但输出文件不存在")
-
-        ctx.metadata["avatar_backend"] = self.provider
-        return self._to_portrait_or_original(output_path, ctx)
 
     def _generate_wav2lip(
         self, ctx: JobContext, avatar_id: str, output_path: Path
@@ -943,9 +816,8 @@ class AvatarEngine(BaseModule):
             try:
                 bbox = draw.textbbox((0, 0), text, font=font)
                 tw = bbox[2] - bbox[0]
-                th = bbox[3] - bbox[1]
             except Exception:
-                tw, th = 400, 80
+                tw = 400
             draw.text(
                 ((w - tw) // 2, cy + y_offset),
                 text, fill=(255, 255, 255), font=font,

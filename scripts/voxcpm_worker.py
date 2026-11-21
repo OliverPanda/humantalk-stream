@@ -89,6 +89,8 @@ def fail(msg: str) -> None:
 
 
 def main() -> None:
+    os.environ["HF_HUB_OFFLINE"] = "1"
+    os.environ["TRANSFORMERS_OFFLINE"] = "1"
     _reconfigure_streams()
     if len(sys.argv) < 2:
         fail("usage: python voxcpm_worker.py <task.json>")
@@ -115,6 +117,12 @@ def main() -> None:
     model_dir = task.get("model_dir") or DEFAULT_MODEL
     if not os.path.exists(model_dir):
         fail(f"模型目录不存在: {model_dir}")
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from krvoiceai.core.pro_models import require_model
+    try:
+        require_model("voxcpm", Path(model_dir))
+    except RuntimeError as exc:
+        fail(str(exc))
     cfg_value = float(task.get("cfg_value", 2.0))
     steps = int(task.get("inference_timesteps", 10))
     seed = int(task.get("seed", 42))

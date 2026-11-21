@@ -26,6 +26,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import traceback
 from pathlib import Path
 
 
@@ -50,7 +51,7 @@ def wait_for_vram(min_free_mb: int, retries: int, wait_seconds: int) -> bool:
     for attempt in range(retries + 1):
         free = query_free_vram_mb()
         if free is None:
-            print(f"[worker] nvidia-smi 不可用，跳过显存闸门", flush=True)
+            print("[worker] nvidia-smi 不可用，跳过显存闸门", flush=True)
             return True
         if free >= min_free_mb:
             print(f"[worker] 显存闸门通过: free={free}MB >= {min_free_mb}MB", flush=True)
@@ -160,6 +161,7 @@ def run_musetalk_once(args, batch_size: int, work_dir: Path) -> Path | None:
     except BaseException as e:
         # OOM/加载失败等：不让异常终止 worker，走降 batch 重试或 fallback
         print(f"[worker] scripts.inference 异常: {type(e).__name__}: {e}", flush=True)
+        traceback.print_exc()
         try:
             import torch
             torch.cuda.empty_cache()
@@ -180,6 +182,8 @@ def run_musetalk_once(args, batch_size: int, work_dir: Path) -> Path | None:
 
 
 def main() -> int:
+    os.environ["HF_HUB_OFFLINE"] = "1"
+    os.environ["TRANSFORMERS_OFFLINE"] = "1"
     parser = argparse.ArgumentParser(description="MuseTalk local worker")
     parser.add_argument("--repo", required=True, help="MuseTalk 仓库根目录")
     parser.add_argument("--face", required=True, help="参考人脸图片或视频")
@@ -197,6 +201,9 @@ def main() -> int:
     parser.add_argument("--vram_wait_seconds", type=int, default=60)
     args = parser.parse_args()
 
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from krvoiceai.core.pro_models import require_musetalk_assets
+    require_musetalk_assets(Path(args.repo))
     outfile = Path(args.outfile).resolve()
     outfile.parent.mkdir(parents=True, exist_ok=True)
 

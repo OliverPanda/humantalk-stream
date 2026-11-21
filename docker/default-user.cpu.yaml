@@ -11,6 +11,7 @@ asr:
   provider: whisper_local
   whisper:
     model_size: /opt/models/faster-whisper-small
+    model_dir: /opt/models/faster-whisper-small
     device: cpu
     compute_type: int8
     cuda_dll_dirs: []

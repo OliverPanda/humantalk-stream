@@ -1,14 +1,12 @@
 """LLM 客户端
 
 统一封装 DeepSeek / Qwen / OpenAI / Agnes 等 OpenAI 兼容 API。
-无 API key 时自动降级为 mock 模式，保证流程可跑通。
+只有显式 mock 测试模式返回模板；缺少 API Key 时报告配置错误。
 内置 429 限流重试机制。
 """
 from __future__ import annotations
 
-import json
 import time
-from typing import Any
 
 import httpx
 
@@ -43,7 +41,7 @@ class LLMClient:
 
     @property
     def is_mock(self) -> bool:
-        return self.provider == "mock" or not self.api_key
+        return self.provider == "mock"
 
     def describe_http_error(self, response: httpx.Response) -> str:
         """保留站点、模型及请求号，避免只返回无上下文的 HTTP 状态。"""
@@ -88,6 +86,8 @@ class LLMClient:
         """
         if self.is_mock:
             return self._mock_response(messages)
+        if not self.api_key:
+            raise LLMServiceError("请在模型配置中填写 DeepSeek API Key，再生成文案或标题。")
 
         url = f"{self.base_url.rstrip('/')}/chat/completions"
         payload = {

@@ -17,6 +17,26 @@ logs/
 # 大素材
 config/broll_assets/
 
+# 本地模型权重与下载缓存（清单、下载脚本和配置仍保留）
+/models/
+/pretrained_models/
+/checkpoints/
+/weights/
+**/.modelscope/
+**/.cache/modelscope/
+**/.cache/huggingface/
+*.safetensors
+*.pth
+*.pt
+*.ckpt
+*.onnx
+*.bin
+*.gguf
+*.h5
+*.tflite
+*.pb
+*.incomplete
+
 # Python
 .venv/
 venv/

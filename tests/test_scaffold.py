@@ -10,14 +10,14 @@ from krvoiceai.core.storage import Storage
 from krvoiceai.pipeline.state import JobStore, JobStatus, PIPELINE_STEPS
 
 
-def test_config_load_default():
+def test_config_load_default(tmp_path, monkeypatch):
     """配置可加载默认文件"""
-    cfg = Config.load()
+    for key in ("KRVOICEAI_LLM_PROVIDER", "KRVOICEAI_AVATAR_PROVIDER"):
+        monkeypatch.delenv(key, raising=False)
+    cfg = Config.load(config_path=tmp_path / "no-user.yaml", env_file=tmp_path / "no-env")
     assert cfg.get("project.name") == "FreeVideoAI"
     assert cfg.get("llm.provider") == "deepseek"
-    # 默认 avatar provider 为 wav2lip（本地 CPU 友好），
-    # 切云端高质量模式时改为 latentsync/musetalk
-    assert cfg.get("avatar.provider") == "wav2lip"
+    assert cfg.get("avatar.provider") == "musetalk_local"
 
 
 def test_config_env_override(monkeypatch):

@@ -3240,7 +3240,7 @@ async function handleRegisterVoice() {
 const TIER_INFO = {
   cloud: { label: '云端档', desc: '未检测到可用独显——本地重模型已锁定；云端引擎（即梦数字人 / Seedance 空镜）不受影响' },
   lite: { label: '标准档', desc: '4-16GB 显卡：音色克隆 + MuseTalk 数字人在本机运行；更重的本地模型已锁定，防止显存不足拖垮任务' },
-  pro: { label: '旗舰档', desc: '≥16GB 大显存：按每个模型的实际显存门槛解锁，LatentSync 仍需 ≥18GB' },
+  pro: { label: 'Pro 旗舰档', desc: '≥18GB：VoxCPM 配音 + MuseTalk 数字人 + Whisper small 字幕' },
 };
 
 async function loadHardwareProfile() {
@@ -3290,11 +3290,11 @@ async function loadInstallationStatus() {
   if (!summary || !button || !log) return;
   try {
     const data = await api('/api/installation');
-    const labels = { cloud: '轻量版', voice: '本地配音版', standard: '本地标准版', pro: '本地增强版' };
+    const labels = { pro: 'Pro 本地版' };
     const names = (data.models || []).join(' + ') || 'Edge TTS + CPU 字幕，数字人需配置远程 API';
-    const optionalNote = (data.optional_models || []).length ? 'LatentSync / EchoMimic 可按模型卡选装。' : '';
+    const optionalNote = '模型权重统一通过 ModelScope 下载。';
     summary.textContent = data.reason || `推荐：${labels[data.profile] || data.profile}（${names}）。${optionalNote}` +
-      (data.available ? '安装会下载依赖和权重，首次可能较久。' : '容器部署请在宿主机执行构建脚本，GPU 版需显式加载 compose.gpu.yaml。');
+      (data.available ? '安装会下载依赖和权重，首次可能较久。' : '请在 Linux GPU 宿主机按 Pro 部署指南安装。');
     button.disabled = !data.available || data.state === 'running';
     button.textContent = data.state === 'running' ? '正在安装…' : '安装推荐方案';
     log.hidden = !data.log;
@@ -3318,7 +3318,7 @@ async function startRecommendedInstall() {
     await api('/api/installation', {
       method: 'POST',
       body: JSON.stringify({
-        profile: 'auto',
+        profile: 'pro',
         activate: document.getElementById('installation-activate').checked,
       }),
     });

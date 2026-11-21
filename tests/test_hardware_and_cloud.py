@@ -64,16 +64,14 @@ def test_ensure_vram_passes_big_card():
 
 
 def test_model_catalog_allowed_flags_on_lite():
-    """lite 档：pro 模型 allowed=False，云端/lite 模型 allowed=True"""
+    """模型管理只列 Pro 使用的三个本地模型。"""
     gpus = [{"name": "RTX 2060", "total_mb": 6144, "free_mb": 5000}]
     with patch.object(hw, "query_gpus", return_value=gpus):
         catalog = hw.get_model_catalog(None)
     by_id = {m["id"]: m for m in catalog}
-    assert by_id["latentsync"]["allowed"] is False
-    assert by_id["echomimic_v3"]["allowed"] is False
+    assert set(by_id) == {"voxcpm", "musetalk", "whisper"}
     assert by_id["musetalk"]["allowed"] is True
-    assert by_id["omnihuman_api"]["allowed"] is True
-    assert by_id["seedance_api"]["allowed"] is True
+    assert by_id["whisper"]["allowed"] is True
 
 
 # ============ Seedance 客户端 ============

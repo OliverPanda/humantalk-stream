@@ -22,6 +22,7 @@ dependencies = [
     "requests>=2.31",
     "httpx>=0.25",
     "filelock>=3.12",
+    "modelscope==1.34.0",
     "edge-tts>=7.3.1",
     # 媒体
     "ffmpeg-python>=0.2",
@@ -59,7 +60,7 @@ tts = [
 ]
 # 本地增强层（纯 CPU 友好，MX450 2GB 显存可跑）
 local = [
-    "faster-whisper>=1.0",  # 词级时间戳字幕精对齐（CPU int8，约 500MB）
+    "faster-whisper==1.2.1",  # Pro: 本地 Whisper small，多语言 CPU int8
     "jieba>=0.42",  # 文案查重 SimHash 中文分词
 ]
 # 云端 GPU 服务依赖（在云 GPU 机器上安装，本地无需）
@@ -77,6 +78,9 @@ krvoiceai = "krvoiceai.ui.cli:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["krvoiceai*"]
+
+[tool.setuptools.package-data]
+"krvoiceai.core" = ["pro_models.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

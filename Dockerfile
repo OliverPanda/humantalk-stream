@@ -40,7 +40,8 @@ RUN python -m playwright install --with-deps chromium
 
 # Local cache is optional. Without it the model is downloaded during build.
 COPY docker/model-cache/ /opt/models/
-RUN python -c "from pathlib import Path; from huggingface_hub import snapshot_download; p=Path('/opt/models/faster-whisper-small'); snapshot_download('Systran/faster-whisper-small', local_dir=str(p), allow_patterns=['model.bin','config.json','tokenizer.json','vocabulary.*','preprocessor_config.json']) if not (p/'model.bin').is_file() else None" \
+COPY scripts/download_pro_models.py /app/scripts/download_pro_models.py
+RUN python /app/scripts/download_pro_models.py --models whisper --destination /opt/models/faster-whisper-small --no-config \
     && python -c "from faster_whisper import WhisperModel; WhisperModel('/opt/models/faster-whisper-small', device='cpu', compute_type='int8', local_files_only=True)"
 
 COPY config/ ./config/

@@ -3,6 +3,8 @@
 用法：
     python start.py            # 启动 Web 界面（默认 http://127.0.0.1:8000）
     python start.py --port 9000
+
+启动时打印生效的 Pro 引擎、模型路径、环境文件检查和修复说明，密钥只显示是否设置。
 """
 import sys
 

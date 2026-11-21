@@ -11,13 +11,10 @@
 from __future__ import annotations
 
 import base64
-import time
-from pathlib import Path
-from typing import Any
 
 import httpx
 
-from ..core.audio_utils import estimate_speech_duration, split_text_to_segments
+from ..core.audio_utils import split_text_to_segments
 from ..core.base_module import BaseModule, JobContext, ModuleResult
 
 
@@ -84,11 +81,7 @@ class SubtitleEngine(BaseModule):
                 )
             except ImportError:
                 self._whisper_available = False
-                self.logger.warning(
-                    "faster-whisper 未安装，降级到 mock 模式（词级时间戳不可用）。"
-                    "安装方法：pip install -e \".[local]\""
-                )
-                self.provider = "mock"
+                self.logger.error("faster-whisper 未安装，请重新运行 Pro 安装器。")
         elif self.provider == "mimo":
             if not self.mimo_api_key or not self.mimo_api_base:
                 self.logger.warning(
@@ -122,7 +115,9 @@ class SubtitleEngine(BaseModule):
         output_path = ctx.work_dir / "subtitle.srt"
 
         try:
-            if self.provider == "whisper_local" and self._whisper_available:
+            if self.provider == "whisper_local":
+                if not self._whisper_available:
+                    raise RuntimeError("faster-whisper 未安装，请重新运行 Pro 安装器。")
                 segments = self._recognize_whisper(ctx)
             elif self.provider == "mimo":
                 segments = self._recognize_mimo(ctx)
@@ -167,7 +162,7 @@ class SubtitleEngine(BaseModule):
         device = self.whisper_cfg.get("device", "cpu")
         compute_type = self.whisper_cfg.get("compute_type", "int8")
         beam_size = int(self.whisper_cfg.get("beam_size", 5))
-        vad_filter = bool(self.whisper_cfg.get("vad_filter", True))
+        vad_filter = bool(self.whisper_cfg.get("vad_filter", False))
 
         self.logger.info(
             f"faster-whisper 识别: {ctx.audio_path.name} "
@@ -226,8 +221,7 @@ class SubtitleEngine(BaseModule):
 
         # 兜底：识别为空时降级
         if not segments:
-            self.logger.warning("faster-whisper 识别为空，降级到 mock")
-            return self._generate_mock(ctx)
+            raise RuntimeError("Whisper 未识别出有效语音，请检查配音文件。")
         return segments
 
     def _split_segment_with_words(

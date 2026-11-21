@@ -52,7 +52,6 @@ async function loadAllSettings() {
     loadTTSSettings();
     loadASRSettings();
     loadAvatarSettings();
-    loadCloudKeysStatus();
     updateModelStatusBadges();
   } catch (e) {
     toast(`加载设置失败: ${e.message}`, 'error');
@@ -66,7 +65,7 @@ function updateModelStatusBadges() {
     const llm = _currentSettings.llm || {};
     if (llm.provider === 'mock' || !llm.api_key_configured) {
       llmBadge.className = 'badge badge-warning';
-      llmBadge.textContent = 'Mock 模式';
+      llmBadge.textContent = '请配置 DeepSeek API Key';
     } else {
       llmBadge.className = 'badge badge-success';
       llmBadge.textContent = `${llm.provider} · ${llm.model || ''}`;
@@ -103,7 +102,7 @@ function updateModelStatusBadges() {
 function loadLLMSettings() {
   if (!_currentSettings) return;
   const llm = _currentSettings.llm || {};
-  document.getElementById('llm-provider').value = llm.provider || 'mock';
+  document.getElementById('llm-provider').value = llm.provider || 'deepseek';
   onLLMProviderChange();
   // 模型
   const modelSelect = document.getElementById('llm-model');
@@ -244,7 +243,7 @@ async function testLLMConnection() {
 function loadTTSSettings() {
   if (!_currentSettings) return;
   const tts = _currentSettings.tts || {};
-  document.getElementById('tts-provider').value = tts.provider || 'mock';
+  document.getElementById('tts-provider').value = tts.provider || 'voxcpm';
   onTTSProviderChange();
   document.getElementById('tts-api-base').value = tts.api_base || '';
   document.getElementById('tts-api-key').value = tts.api_key || '';
@@ -335,8 +334,8 @@ async function testTTSConnection() {
 function loadASRSettings() {
   if (!_currentSettings) return;
   const asr = _currentSettings.asr || {};
-  document.getElementById('asr-provider').value = asr.provider || 'mock';
-  document.getElementById('asr-model').value = asr.model || 'paraformer-zh';
+  document.getElementById('asr-provider').value = asr.provider || 'whisper_local';
+  document.getElementById('asr-model').value = 'small';
   document.getElementById('asr-language').value = asr.language || 'zh';
   const subtitle = asr.subtitle || {};
   document.getElementById('asr-max-chars').value = subtitle.max_chars_per_line || 18;
@@ -562,7 +561,7 @@ async function saveCloudKeys() {
 function loadAvatarSettings() {
   if (!_currentSettings) return;
   const avatar = _currentSettings.avatar || {};
-  document.getElementById('avatar-provider').value = avatar.provider || 'mock';
+  document.getElementById('avatar-provider').value = avatar.provider || 'musetalk_local';
   onAvatarProviderChange();
   document.getElementById('avatar-default').value = avatar.default_avatar || 'default';
   document.getElementById('avatar-api-base').value = avatar.api_base || '';
